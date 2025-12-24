@@ -7,6 +7,9 @@ A browser-based differential growth prototype inspired by coral-like forms, gene
 - Parametric controls for iterations, step length, twist, scale, and ring size
 - Sphere attractor to guide growth within a controllable radius
 - Gradient coloring from base surface to ridge
+- Mesh mode with adjustable thickness and line mode for lightweight previews
+- Export to OBJ or GLTF
+- Orbit controls with a Houdini-style grid and attractor gumball
 - Local dev server for fast iteration
 
 ## Getting Started
@@ -17,7 +20,10 @@ A browser-based differential growth prototype inspired by coral-like forms, gene
 3. Open the local URL shown in the terminal.
 
 ## Controls
-- Growth: `segments`, `iterations`, `stepLength`, `ringRadius`, `scale`, `twist`
-- Attractor: `attractorX`, `attractorY`, `attractorZ`, `attractorRadius`, `attractorStrength`
+- Base: `ringRadius`, `extrusionWidth`, `baseQuadDivisions`
+- Growth: `mode`, `segments`, `iterations`, `stepLength`, `scale`, `twist`
+- Noise: `noiseAmplitude`, `noiseFrequency`, `noiseVertical`
+- Attractor: `attractorRadius`, `attractorStrength`, `attractorFalloff`, `attractorBias` (move with gumball)
+- Material: `meshThickness`, `meshOpacity`, `lineOpacity`
 - Color: `baseColor`, `ridgeColor`
 - View: `autoRotate`
