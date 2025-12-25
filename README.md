@@ -7,8 +7,8 @@ A browser-based differential growth prototype inspired by coral-like forms, gene
 - Parametric controls for iterations, step length, twist, scale, and ring size
 - Sphere attractor to guide growth within a controllable radius
 - Gradient coloring from base surface to ridge
-- Mesh mode with adjustable thickness and line mode for lightweight previews
-- Export to OBJ or GLTF
+- Mesh mode with adjustable thickness, smoothing, and line mode for previews
+- Seam bridging between base ring and leaf growth
 - Orbit controls with a Houdini-style grid and attractor gumball
 - Local dev server for fast iteration
 
@@ -21,9 +21,10 @@ A browser-based differential growth prototype inspired by coral-like forms, gene
 
 ## Controls
 - Base: `ringRadius`, `extrusionWidth`, `baseQuadDivisions`
-- Growth: `mode`, `segments`, `iterations`, `stepLength`, `scale`, `twist`
-- Noise: `noiseAmplitude`, `noiseFrequency`, `noiseVertical`
+- Growth: `mode`, `segments`, `iterations`, `stepLength`, `scale`, `twist`, `growthFalloff`
+- Leaf: `ruffleAmplitude`, `ruffleFrequency`, `ruffleGrowth`, `leafGrowth`, `ridgeLift`, `ridgeSharpness`, `curl`, `bowl`, `taper`
 - Attractor: `attractorRadius`, `attractorStrength`, `attractorFalloff`, `attractorBias` (move with gumball)
-- Material: `meshThickness`, `meshOpacity`, `lineOpacity`
+- Collision: `collisionStrength`, `collisionIterations`, `collisionRange`
+- Material: `meshThickness`, `meshOpacity`, `lineOpacity`, `smoothnessStrength`
 - Color: `baseColor`, `ridgeColor`
 - View: `autoRotate`
