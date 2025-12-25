@@ -118,6 +118,7 @@ const params = {
   attractorFalloff: 1.5,
   attractorBias: 0.15,
   meshThickness: 0,
+  thicknessRadius: 1,
   meshOpacity: 1,
   lineOpacity: 1,
   smoothnessStrength: 3,
@@ -858,8 +859,9 @@ function mergeAndSmoothMeshes() {
   const smoothSteps = Math.max(1, Math.min(10, Math.floor(params.smoothnessStrength)));
   smoothLaplacian(welded, smoothSteps + 3, 0.24 + smoothSteps * 0.03);
   flipTriangleWinding(welded);
-  applyVerticalGradient(welded, params.baseColor, params.ridgeColor);
-  welded.computeVertexNormals();
+  const thickened = applyThickness(welded, params.meshThickness, params.thicknessRadius);
+  applyVerticalGradient(thickened, params.baseColor, params.ridgeColor);
+  thickened.computeVertexNormals();
 
   const material = new THREE.MeshStandardMaterial({
     vertexColors: true,
@@ -870,7 +872,7 @@ function mergeAndSmoothMeshes() {
     side: THREE.DoubleSide,
   });
 
-  mergedMesh = new THREE.Mesh(welded, material);
+  mergedMesh = new THREE.Mesh(thickened, material);
   growthGroup.add(mergedMesh);
 
   growthGroup.remove(growthMesh);
@@ -896,6 +898,87 @@ function flipTriangleWinding(geometry) {
     indices[i + 2] = tmp;
   }
   index.needsUpdate = true;
+}
+
+function applyThickness(geometry, thickness, radiusScale) {
+  const amount = Math.max(0, thickness);
+  if (amount <= 0) {
+    return geometry;
+  }
+  const scale = Math.max(0.1, radiusScale || 1);
+  const source = geometry.index ? geometry : BufferGeometryUtils.mergeVertices(geometry, 1e-6);
+  source.computeVertexNormals();
+  const srcPos = source.getAttribute("position");
+  const srcNorm = source.getAttribute("normal");
+  const index = source.getIndex();
+  if (!index) {
+    return geometry;
+  }
+
+  const vertexCount = srcPos.count;
+  const outerPositions = new Float32Array(vertexCount * 3);
+  const innerPositions = new Float32Array(vertexCount * 3);
+
+  for (let i = 0; i < vertexCount; i += 1) {
+    const offset = amount * 0.5 * scale;
+    const ox = srcPos.getX(i) + srcNorm.getX(i) * offset;
+    const oy = srcPos.getY(i) + srcNorm.getY(i) * offset;
+    const oz = srcPos.getZ(i) + srcNorm.getZ(i) * offset;
+    const ix = srcPos.getX(i) - srcNorm.getX(i) * offset;
+    const iy = srcPos.getY(i) - srcNorm.getY(i) * offset;
+    const iz = srcPos.getZ(i) - srcNorm.getZ(i) * offset;
+    outerPositions[i * 3] = ox;
+    outerPositions[i * 3 + 1] = oy;
+    outerPositions[i * 3 + 2] = oz;
+    innerPositions[i * 3] = ix;
+    innerPositions[i * 3 + 1] = iy;
+    innerPositions[i * 3 + 2] = iz;
+  }
+
+  const indices = Array.from(index.array);
+  const innerOffset = vertexCount;
+  const combinedIndices = indices.slice();
+  for (let i = 0; i < indices.length; i += 3) {
+    const a = indices[i] + innerOffset;
+    const b = indices[i + 1] + innerOffset;
+    const c = indices[i + 2] + innerOffset;
+    combinedIndices.push(a, c, b);
+  }
+
+  const edgeCount = new Map();
+  for (let i = 0; i < indices.length; i += 3) {
+    const tri = [indices[i], indices[i + 1], indices[i + 2]];
+    for (let e = 0; e < 3; e += 1) {
+      const a = tri[e];
+      const b = tri[(e + 1) % 3];
+      const key = a < b ? `${a}_${b}` : `${b}_${a}`;
+      edgeCount.set(key, (edgeCount.get(key) || 0) + 1);
+    }
+  }
+
+  edgeCount.forEach((count, key) => {
+    if (count !== 1) {
+      return;
+    }
+    const parts = key.split("_");
+    const a = Number(parts[0]);
+    const b = Number(parts[1]);
+    const aInner = a + innerOffset;
+    const bInner = b + innerOffset;
+    combinedIndices.push(a, b, bInner, a, bInner, aInner);
+  });
+
+  const combined = new THREE.BufferGeometry();
+  const combinedPositions = new Float32Array(vertexCount * 6);
+  combinedPositions.set(outerPositions, 0);
+  combinedPositions.set(innerPositions, vertexCount * 3);
+  combined.setAttribute(
+    "position",
+    new THREE.Float32BufferAttribute(combinedPositions, 3)
+  );
+  combined.setIndex(combinedIndices);
+  combined.computeVertexNormals();
+  return combined;
 }
 
 function applyVerticalGradient(geometry, baseHex, ridgeHex) {
@@ -1153,7 +1236,8 @@ attractorFolder.add(params, "attractorFalloff", 0.5, 3, 0.05).onChange(buildGrow
 attractorFolder.add(params, "attractorBias", -0.2, 0.6, 0.01).onChange(buildGrowth);
 
 const materialFolder = gui.addFolder("Material");
-materialFolder.add(params, "meshThickness", 0, 0.4, 0.01).onChange(buildGrowth);
+materialFolder.add(params, "meshThickness", 0, 0.05, 0.001).onChange(buildGrowth);
+materialFolder.add(params, "thicknessRadius", 0.1, 2, 0.01).onChange(buildGrowth);
 materialFolder.add(params, "meshOpacity", 0.2, 1, 0.01).onChange(buildGrowth);
 materialFolder.add(params, "lineOpacity", 0.1, 1, 0.01).onChange(buildGrowth);
 materialFolder.add(params, "smoothnessStrength", 1, 10, 1).onChange(buildGrowth);

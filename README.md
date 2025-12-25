@@ -25,6 +25,6 @@ A browser-based differential growth prototype inspired by coral-like forms, gene
 - Leaf: `ruffleAmplitude`, `ruffleFrequency`, `ruffleGrowth`, `leafGrowth`, `ridgeLift`, `ridgeSharpness`, `curl`, `bowl`, `taper`
 - Attractor: `attractorRadius`, `attractorStrength`, `attractorFalloff`, `attractorBias` (move with gumball)
 - Collision: `collisionStrength`, `collisionIterations`, `collisionRange`
-- Material: `meshThickness`, `meshOpacity`, `lineOpacity`, `smoothnessStrength`
+- Material: `meshThickness`, `thicknessRadius`, `meshOpacity`, `lineOpacity`, `smoothnessStrength`
 - Color: `baseColor`, `ridgeColor`
 - View: `autoRotate`
