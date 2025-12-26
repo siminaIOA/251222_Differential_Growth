@@ -47,10 +47,7 @@ scene.add(fillLight);
 const attractorMesh = new THREE.Mesh(
   new THREE.SphereGeometry(1, 32, 32),
   new THREE.MeshBasicMaterial({
-    color: "#1f6f8b",
-    wireframe: true,
-    transparent: true,
-    opacity: 0.35,
+    color: "#ffff00",
   })
 );
 scene.add(attractorMesh);
@@ -80,6 +77,7 @@ scene.add(axesHelper);
 const gridSize = 20;
 const minorDivisions = 40;
 const majorDivisions = 10;
+const DEFAULT_SIM_SEGMENTS_CAP = 240;
 
 const minorGrid = new THREE.GridHelper(gridSize, minorDivisions, "#1a1f24", "#1a1f24");
 minorGrid.position.y = -0.4;
@@ -96,10 +94,11 @@ scene.add(majorGrid);
 const params = {
   mode: "mesh",
   segments: 140,
-  iterations: 32,
+  simSegmentsCap: DEFAULT_SIM_SEGMENTS_CAP,
+  iterations: 30,
   stepLength: 0.11,
   ringRadius: 1.2,
-  scale: 0.55,
+  ringSegments: 240,
   twist: 2.4,
   ruffleAmplitude: 0.35,
   ruffleFrequency: 2.6,
@@ -113,23 +112,24 @@ const params = {
   attractorX: 0.6,
   attractorY: 1.0,
   attractorZ: -0.4,
-  attractorRadius: 0.2,
+  attractorRadius: 0.1,
   attractorStrength: 0.45,
-  attractorFalloff: 1.5,
   attractorBias: 0.15,
   meshThickness: 0,
   thicknessRadius: 1,
   meshOpacity: 1,
   lineOpacity: 1,
+  lineColor: "#ffffff",
   smoothnessStrength: 3,
   collisionStrength: 0.6,
   collisionIterations: 2,
   collisionRange: 1.8,
   ridgeColor: "#ff0000",
   baseColor: "#00a6ff",
-  extrusionWidth: 0.06,
+  extrusionWidth: 0.25,
   baseQuadDivisions: 6,
   baseCullFalloff: 0.3,
+  deformableZone: 1,
   growthFalloff: 1.2,
   autoRotate: false,
 };
@@ -196,6 +196,63 @@ function resampleRing(points, targetCount) {
   return result;
 }
 
+function resampleRingByIndex(points, targetCount) {
+  if (!points || points.length < 2) {
+    return null;
+  }
+  const count = points.length;
+  const result = [];
+  for (let i = 0; i < targetCount; i += 1) {
+    const t = (i / targetCount) * count;
+    const index = Math.floor(t);
+    const localT = t - index;
+    const a = points[index % count];
+    const b = points[(index + 1) % count];
+    result.push(a.clone().lerp(b, localT));
+  }
+  return result;
+}
+
+function resampleMaskByIndex(mask, targetCount) {
+  if (!mask || mask.length < 2) {
+    return null;
+  }
+  const count = mask.length;
+  const result = new Array(targetCount);
+  for (let i = 0; i < targetCount; i += 1) {
+    const t = (i / targetCount) * count;
+    const index = Math.floor(t);
+    const localT = t - index;
+    const a = mask[index % count];
+    const b = mask[(index + 1) % count];
+    result[i] = a + (b - a) * localT;
+  }
+  return result;
+}
+
+function resampleRings(rings, targetCount) {
+  if (!rings || rings.length === 0) {
+    return rings;
+  }
+  const currentCount = rings[0].points.length;
+  if (currentCount === targetCount) {
+    return rings;
+  }
+  return rings.map((ring) => {
+    const points = resampleRingByIndex(ring.points, targetCount);
+    if (!points) {
+      return ring;
+    }
+    const center = new THREE.Vector3();
+    for (const point of points) {
+      center.add(point);
+    }
+    center.multiplyScalar(1 / points.length);
+    const mask = ring.mask ? resampleMaskByIndex(ring.mask, targetCount) : null;
+    return { points, center, mask };
+  });
+}
+
 function generateRings() {
   const rings = [];
   const center = new THREE.Vector3(
@@ -204,7 +261,8 @@ function generateRings() {
     params.attractorZ
   );
   const total = Math.max(1, params.iterations);
-  const segments = Math.max(3, params.segments);
+  const simCap = Math.max(3, Math.floor(params.simSegmentsCap || params.segments));
+  const segments = Math.max(3, Math.min(params.segments, simCap));
 
   const basePoints = resampleRing(baseSeedPoints, segments);
   baseSeedRing = basePoints ? basePoints.map((p) => p.clone()) : null;
@@ -318,6 +376,41 @@ function generateRings() {
   return rings;
 }
 
+function buildSpatialGrid(entries, cellSize) {
+  const map = new Map();
+  for (const entry of entries) {
+    const point = entry.point;
+    const cx = Math.floor(point.x / cellSize);
+    const cy = Math.floor(point.y / cellSize);
+    const cz = Math.floor(point.z / cellSize);
+    const key = `${cx}_${cy}_${cz}`;
+    const bucket = map.get(key) || [];
+    bucket.push(entry);
+    map.set(key, bucket);
+  }
+  return { map, cellSize };
+}
+
+function collectNeighbors(point, grid) {
+  const results = [];
+  const cellSize = grid.cellSize;
+  const cx = Math.floor(point.x / cellSize);
+  const cy = Math.floor(point.y / cellSize);
+  const cz = Math.floor(point.z / cellSize);
+  for (let dx = -1; dx <= 1; dx += 1) {
+    for (let dy = -1; dy <= 1; dy += 1) {
+      for (let dz = -1; dz <= 1; dz += 1) {
+        const key = `${cx + dx}_${cy + dy}_${cz + dz}`;
+        const bucket = grid.map.get(key);
+        if (bucket) {
+          results.push(...bucket);
+        }
+      }
+    }
+  }
+  return results;
+}
+
 function gentleRelax(
   ring,
   ringCenter,
@@ -330,28 +423,37 @@ function gentleRelax(
   if (!ring || ring.length < 3) {
     return;
   }
-  const minDist = Math.max(0.001, targetSpacing);
-  const range = minDist * Math.max(1, rangeMultiplier);
+  const baseSpacing = Math.max(0.001, targetSpacing);
+  const spacing = baseSpacing * (1 + Math.max(0, strength) * 0.6);
+  const range = spacing * Math.max(1, rangeMultiplier);
   const passes = Math.max(0, Math.floor(iterations));
-  const neighborSpan = 2;
+  if (passes === 0) {
+    return;
+  }
+
   for (let pass = 0; pass < passes; pass += 1) {
-    for (let j = 0; j < ring.length; j += 1) {
-      const point = ring[j];
-      for (let n = 1; n <= neighborSpan; n += 1) {
-        const prev = ring[(j - n + ring.length) % ring.length];
-        const next = ring[(j + n) % ring.length];
-        gentleRepel(point, prev, minDist, range, 0.25 * strength);
-        gentleRepel(point, next, minDist, range, 0.25 * strength);
+    const dynamicEntries = ring.map((point) => ({ point, isStatic: false }));
+    const staticEntries = prevRing
+      ? prevRing.points.map((point) => ({ point, isStatic: true }))
+      : [];
+    const grid = buildSpatialGrid([...dynamicEntries, ...staticEntries], range);
+
+    for (const entry of dynamicEntries) {
+      const point = entry.point;
+      const neighbors = collectNeighbors(point, grid);
+      for (const neighbor of neighbors) {
+        if (neighbor.point === point) {
+          continue;
+        }
+        const repelStrength = neighbor.isStatic ? 0.85 * strength : 0.65 * strength;
+        gentleRepel(point, neighbor.point, spacing, range, repelStrength);
       }
-      if (prevRing) {
-        const prevPoint = prevRing.points[j];
-        gentleRepel(point, prevPoint, minDist, range, 0.2 * strength);
-      }
+
       const radial = point.clone().sub(ringCenter);
       if (radial.lengthSq() > 1e-6) {
         const radialDist = radial.length();
-        if (radialDist < minDist * 0.5) {
-          point.addScaledVector(radial.normalize(), (minDist * 0.5 - radialDist) * 0.4);
+        if (radialDist < spacing * 0.5) {
+          point.addScaledVector(radial.normalize(), (spacing * 0.5 - radialDist) * 0.4);
         }
       }
     }
@@ -371,6 +473,56 @@ function gentleRepel(a, b, minDist, range, strength) {
     offset.normalize().multiplyScalar(push);
   }
   a.add(offset);
+}
+
+function applyGlobalRelax(rings) {
+  const strength = Math.max(0, params.collisionStrength);
+  const passes = Math.max(0, Math.floor(params.collisionIterations));
+  if (strength <= 0 || passes === 0) {
+    return;
+  }
+  const simCap = Math.max(3, Math.floor(params.simSegmentsCap || params.segments));
+  const segments = rings[0]
+    ? rings[0].points.length
+    : Math.max(3, Math.min(params.segments, simCap));
+  const baseSpacing = Math.max(0.001, params.stepLength * 0.6);
+  const segmentBoost = Math.max(1, Math.sqrt(segments / 140));
+  const boostedStrength = strength * (1 + (segmentBoost - 1) * 0.75);
+  const minDist = baseSpacing * (0.65 + 0.6 * boostedStrength) * segmentBoost;
+  const range = minDist * Math.max(1, params.collisionRange) * segmentBoost;
+
+  for (let pass = 0; pass < passes; pass += 1) {
+    const entries = [];
+    for (let r = 0; r < rings.length; r += 1) {
+      const ring = rings[r].points;
+      const mask = rings[r].mask || [];
+      for (let i = 0; i < ring.length; i += 1) {
+        if (mask[i] <= 0.02) {
+          continue;
+        }
+        entries.push({ point: ring[i], ringIndex: r, pointIndex: i });
+      }
+    }
+
+    const grid = buildSpatialGrid(entries, range);
+
+    for (const entry of entries) {
+      const neighbors = collectNeighbors(entry.point, grid);
+      for (const neighbor of neighbors) {
+        if (neighbor.point === entry.point) {
+          continue;
+        }
+        const ringSpan = Math.abs(entry.ringIndex - neighbor.ringIndex);
+        const diff = Math.abs(entry.pointIndex - neighbor.pointIndex);
+        const wrapDiff = Math.min(diff, segments - diff);
+        if (ringSpan === 0 && wrapDiff <= 1) {
+          continue;
+        }
+        const localStrength = ringSpan <= 1 ? boostedStrength * 0.7 : boostedStrength;
+        gentleRepel(entry.point, neighbor.point, minDist, range, localStrength);
+      }
+    }
+  }
 }
 
 function clearGrowth() {
@@ -404,7 +556,10 @@ function updateBaseRing() {
   baseSeedPoints = [];
 
   const width = Math.max(0.01, params.extrusionWidth);
-  const radialSegments = Math.max(48, Math.floor(params.segments / 2));
+  const radialSegments = Math.min(
+    720,
+    Math.max(24, Math.floor(params.ringSegments || 240))
+  );
   const heightSegments = Math.max(1, Math.min(10, Math.floor(params.baseQuadDivisions)));
   const positions = [];
   const indices = [];
@@ -609,9 +764,9 @@ function updateBaseRing() {
       new THREE.Float32BufferAttribute(linePositions, 3)
     );
     const material = new THREE.LineBasicMaterial({
-      color: "#29ff8a",
+      color: params.lineColor,
       transparent: true,
-      opacity: 0.7,
+      opacity: params.lineOpacity,
     });
     baseRingMesh = new THREE.LineSegments(geometry, material);
   }
@@ -620,13 +775,9 @@ function updateBaseRing() {
 
 function buildLineGrowth(rings) {
   const positions = [];
-  const colors = [];
-  const segments = Math.max(3, params.segments);
-  const baseColor = new THREE.Color(params.baseColor);
-  const ridgeColor = new THREE.Color(params.ridgeColor);
+  const segments = rings[0] ? rings[0].points.length : Math.max(3, params.segments);
 
   for (let i = 0; i < rings.length; i += 1) {
-    const color = baseColor.clone().lerp(ridgeColor, i / (rings.length - 1));
     const ring = rings[i].points;
     const mask = rings[i].mask || [];
 
@@ -639,7 +790,6 @@ function buildLineGrowth(rings) {
 
       positions.push(current.x, current.y, current.z);
       positions.push(next.x, next.y, next.z);
-      colors.push(color.r, color.g, color.b, color.r, color.g, color.b);
 
       if (i < rings.length - 1) {
         if ((rings[i + 1].mask || [])[j] <= 0.02) {
@@ -648,7 +798,6 @@ function buildLineGrowth(rings) {
         const upper = rings[i + 1].points[j];
         positions.push(current.x, current.y, current.z);
         positions.push(upper.x, upper.y, upper.z);
-        colors.push(color.r, color.g, color.b, color.r, color.g, color.b);
       }
     }
   }
@@ -658,13 +807,9 @@ function buildLineGrowth(rings) {
     "position",
     new THREE.Float32BufferAttribute(positions, 3)
   );
-  geometry.setAttribute(
-    "color",
-    new THREE.Float32BufferAttribute(colors, 3)
-  );
 
   const material = new THREE.LineBasicMaterial({
-    vertexColors: true,
+    color: params.lineColor,
     transparent: true,
     opacity: params.lineOpacity,
   });
@@ -674,7 +819,7 @@ function buildLineGrowth(rings) {
 }
 
 function buildMeshGrowth(rings) {
-  const segments = Math.max(3, params.segments);
+  const segments = rings[0] ? rings[0].points.length : Math.max(3, params.segments);
   const baseColor = new THREE.Color(params.baseColor);
   const ridgeColor = new THREE.Color(params.ridgeColor);
   const thickness = Math.max(0, params.meshThickness);
@@ -829,12 +974,29 @@ function buildGrowth() {
   updateAttractor();
   updateBaseRing();
   const rings = generateRings();
+  applyGlobalRelax(rings);
+
+  const targetSegments = Math.max(3, params.segments);
+  const simSegments = rings[0] ? rings[0].points.length : targetSegments;
+  const displayRings =
+    simSegments === targetSegments ? rings : resampleRings(rings, targetSegments);
+
+  if (baseSeedRing && simSegments !== targetSegments) {
+    const resampledBase = resampleRingByIndex(baseSeedRing, targetSegments);
+    if (resampledBase) {
+      baseSeedRing = resampledBase;
+    }
+  }
+
+  if (displayRings[0] && displayRings[0].points) {
+    firstGrowthRing = displayRings[0].points.map((point) => point.clone());
+  }
 
   if (params.mode === "mesh") {
-    buildMeshGrowth(rings);
+    buildMeshGrowth(displayRings);
     mergeAndSmoothMeshes();
   } else {
-    buildLineGrowth(rings);
+    buildLineGrowth(displayRings);
   }
 }
 
@@ -846,20 +1008,35 @@ function mergeAndSmoothMeshes() {
     return;
   }
 
-  const baseGeom = BufferGeometryUtils.mergeVertices(baseRingMesh.geometry.clone(), 5e-2);
-  const growthGeom = BufferGeometryUtils.mergeVertices(growthMesh.geometry.clone(), 5e-2);
+  const baseGeom = BufferGeometryUtils.mergeVertices(baseRingMesh.geometry.clone(), 1e-4);
+  const growthGeom = BufferGeometryUtils.mergeVertices(growthMesh.geometry.clone(), 1e-4);
+  const smoothSteps = Math.max(1, Math.min(15, Math.floor(params.smoothnessStrength)));
+  smoothLaplacian(growthGeom, smoothSteps + 3, 0.24 + smoothSteps * 0.03);
   stitchSeam(baseGeom, growthGeom, params.attractorRadius * 4);
-  const bridgeGeom = buildBridgeGeometry(baseSeedRing, firstGrowthRing, 4);
+  const bridgeRings = Math.max(4, Math.min(12, Math.round(params.smoothnessStrength) + 2));
+  const bridgeGeom = buildBridgeGeometry(baseSeedRing, firstGrowthRing, bridgeRings);
   const mergeList = bridgeGeom ? [baseGeom, growthGeom, bridgeGeom] : [baseGeom, growthGeom];
   const merged = BufferGeometryUtils.mergeGeometries(mergeList, true);
   if (!merged) {
     return;
   }
-  const welded = BufferGeometryUtils.mergeVertices(merged, 5e-2);
-  const smoothSteps = Math.max(1, Math.min(10, Math.floor(params.smoothnessStrength)));
-  smoothLaplacian(welded, smoothSteps + 3, 0.24 + smoothSteps * 0.03);
-  flipTriangleWinding(welded);
-  const thickened = applyThickness(welded, params.meshThickness, params.thicknessRadius);
+  const welded = BufferGeometryUtils.mergeVertices(merged, 1e-4);
+  const seamRadius = Math.max(
+    0.05,
+    params.extrusionWidth * 1.5,
+    params.stepLength * 6,
+    params.attractorRadius * 4
+  );
+  lockSeamVertices(welded, baseSeedRing, firstGrowthRing, seamRadius);
+  enforceRingRoundness(welded);
+  const seamWeld = Math.min(0.015, seamRadius * 0.1);
+  const seamWelded = BufferGeometryUtils.mergeVertices(welded, seamWeld);
+  flipTriangleWinding(seamWelded);
+  const thickened = applyThickness(
+    seamWelded,
+    params.meshThickness,
+    params.thicknessRadius
+  );
   applyVerticalGradient(thickened, params.baseColor, params.ridgeColor);
   thickened.computeVertexNormals();
 
@@ -1135,6 +1312,123 @@ function stitchSeam(baseGeometry, growthGeometry, radius) {
   basePos.needsUpdate = true;
 }
 
+function lockSeamVertices(geometry, baseRing, growthRing, radius) {
+  if (!geometry || !baseRing || !growthRing) {
+    return geometry;
+  }
+  const count = Math.min(baseRing.length, growthRing.length);
+  if (count < 3) {
+    return geometry;
+  }
+  const radiusValue = Math.max(0.001, radius);
+  const radiusSq = radiusValue * radiusValue;
+  const targets = new Array(count);
+
+  for (let i = 0; i < count; i += 1) {
+    const a = baseRing[i];
+    const b = growthRing[i];
+    targets[i] = new THREE.Vector3(
+      (a.x + b.x) * 0.5,
+      (a.y + b.y) * 0.5,
+      (a.z + b.z) * 0.5
+    );
+  }
+
+  const position = geometry.getAttribute("position");
+  for (let i = 0; i < position.count; i += 1) {
+    const vx = position.getX(i);
+    const vy = position.getY(i);
+    const vz = position.getZ(i);
+    let closest = -1;
+    let closestDistSq = radiusSq;
+    for (let j = 0; j < count; j += 1) {
+      const t = targets[j];
+      const dx = t.x - vx;
+      const dy = t.y - vy;
+      const dz = t.z - vz;
+      const distSq = dx * dx + dy * dy + dz * dz;
+      if (distSq < closestDistSq) {
+        closestDistSq = distSq;
+        closest = j;
+      }
+    }
+    if (closest >= 0) {
+      const t = targets[closest];
+      const dist = Math.sqrt(closestDistSq);
+      const influence = 1 - dist / radiusValue;
+      position.setXYZ(
+        i,
+        vx + (t.x - vx) * influence,
+        vy + (t.y - vy) * influence,
+        vz + (t.z - vz) * influence
+      );
+    }
+  }
+  position.needsUpdate = true;
+  return geometry;
+}
+
+function smoothStep(value) {
+  const t = Math.max(0, Math.min(1, value));
+  return t * t * (3 - 2 * t);
+}
+
+function enforceRingRoundness(geometry) {
+  const position = geometry.getAttribute("position");
+  if (!position) {
+    return;
+  }
+  const ringRadius = Math.max(0.001, params.ringRadius);
+  const width = Math.max(0.001, params.extrusionWidth);
+  const attractorPos = new THREE.Vector3(
+    params.attractorX,
+    params.attractorY,
+    params.attractorZ
+  );
+  const zoneScale = Math.max(0.05, params.deformableZone || 1);
+  const band = Math.max(width * 1.5, params.stepLength * 4);
+  const minRadius = ringRadius - band;
+  const maxRadius = ringRadius + band;
+  const xLimit = width * 1.4;
+
+  for (let i = 0; i < position.count; i += 1) {
+    const x = position.getX(i);
+    if (Math.abs(x) > xLimit) {
+      continue;
+    }
+    const y = position.getY(i);
+    const z = position.getZ(i);
+    const radial = Math.sqrt(y * y + z * z);
+    if (radial < minRadius || radial > maxRadius) {
+      continue;
+    }
+    if (radial < 1e-6) {
+      continue;
+    }
+
+    const influence = getSelectionInfluence(
+      new THREE.Vector3(x, y, z),
+      attractorPos
+    );
+    const shaped = smoothStep(Math.pow(influence, 0.6 * zoneScale));
+    const lock = 1 - shaped;
+    if (lock <= 0) {
+      continue;
+    }
+
+    const scale = ringRadius / radial;
+    const targetY = y * scale;
+    const targetZ = z * scale;
+    position.setXYZ(
+      i,
+      x,
+      y + (targetY - y) * lock,
+      z + (targetZ - z) * lock
+    );
+  }
+  position.needsUpdate = true;
+}
+
 function smoothLaplacian(geometry, iterations, lambda) {
   const position = geometry.getAttribute("position");
   const index = geometry.getIndex();
@@ -1204,17 +1498,19 @@ const gui = new GUI({ width: 320 });
 const growthFolder = gui.addFolder("Growth");
 growthFolder.add(params, "mode", ["mesh", "lines"]).onChange(buildGrowth);
 growthFolder.add(params, "segments", 24, 400, 1).onChange(buildGrowth);
-growthFolder.add(params, "iterations", 4, 90, 1).onChange(buildGrowth);
+growthFolder.add(params, "simSegmentsCap", 60, 400, 1).onChange(buildGrowth);
+growthFolder.add(params, "iterations", 4, 30, 1).onChange(buildGrowth);
 growthFolder.add(params, "stepLength", 0.02, 0.4, 0.01).onChange(buildGrowth);
-growthFolder.add(params, "scale", -0.5, 1.4, 0.01).onChange(buildGrowth);
 growthFolder.add(params, "twist", -6.28, 6.28, 0.01).onChange(buildGrowth);
 growthFolder.add(params, "growthFalloff", 0.2, 3, 0.05).onChange(buildGrowth);
 
 const baseFolder = gui.addFolder("Base");
 baseFolder.add(params, "ringRadius", 0.2, 3, 0.05).onChange(buildGrowth);
-baseFolder.add(params, "extrusionWidth", 0.1, 1, 0.01).onChange(buildGrowth);
+baseFolder.add(params, "ringSegments", 60, 720, 1).onChange(buildGrowth);
+baseFolder.add(params, "extrusionWidth", 0.1, 0.3, 0.01).onChange(buildGrowth);
 baseFolder.add(params, "baseQuadDivisions", 1, 10, 1).onChange(buildGrowth);
 baseFolder.add(params, "baseCullFalloff", 0.05, 1.5, 0.01).onChange(buildGrowth);
+baseFolder.add(params, "deformableZone", 0.3, 2, 0.05).onChange(buildGrowth);
 
 const leafFolder = gui.addFolder("Leaf");
 leafFolder.add(params, "ruffleAmplitude", 0, 0.8, 0.01).onChange(buildGrowth);
@@ -1223,8 +1519,8 @@ leafFolder.add(params, "ruffleGrowth", 0, 2, 0.05).onChange(buildGrowth);
 leafFolder.add(params, "leafGrowth", 0, 3, 0.05).onChange(buildGrowth);
 leafFolder.add(params, "ridgeLift", 0, 0.6, 0.01).onChange(buildGrowth);
 leafFolder.add(params, "ridgeSharpness", 0.2, 3, 0.05).onChange(buildGrowth);
-leafFolder.add(params, "curl", -2.5, 2.5, 0.01).onChange(buildGrowth);
-leafFolder.add(params, "bowl", -0.5, 0.5, 0.01).onChange(buildGrowth);
+leafFolder.add(params, "curl", -0.85, 0.85, 0.01).onChange(buildGrowth);
+leafFolder.add(params, "bowl", -0.3, -0.05, 0.01).onChange(buildGrowth);
 leafFolder.add(params, "taper", 0, 1.2, 0.01).onChange(buildGrowth);
 
 const attractorFolder = gui.addFolder("Attractor");
@@ -1232,7 +1528,6 @@ attractorFolder.add(params, "attractorRadius", 0.1, 0.2, 0.01).onChange(buildGro
 attractorFolder
   .add(params, "attractorStrength", 0, 1.2, 0.01)
   .onChange(buildGrowth);
-attractorFolder.add(params, "attractorFalloff", 0.5, 3, 0.05).onChange(buildGrowth);
 attractorFolder.add(params, "attractorBias", -0.2, 0.6, 0.01).onChange(buildGrowth);
 
 const materialFolder = gui.addFolder("Material");
@@ -1240,12 +1535,13 @@ materialFolder.add(params, "meshThickness", 0, 0.05, 0.001).onChange(buildGrowth
 materialFolder.add(params, "thicknessRadius", 0.1, 2, 0.01).onChange(buildGrowth);
 materialFolder.add(params, "meshOpacity", 0.2, 1, 0.01).onChange(buildGrowth);
 materialFolder.add(params, "lineOpacity", 0.1, 1, 0.01).onChange(buildGrowth);
-materialFolder.add(params, "smoothnessStrength", 1, 10, 1).onChange(buildGrowth);
+materialFolder.addColor(params, "lineColor").onChange(buildGrowth);
+materialFolder.add(params, "smoothnessStrength", 1, 15, 1).onChange(buildGrowth);
 
 const collisionFolder = gui.addFolder("Collision");
 collisionFolder.add(params, "collisionStrength", 0, 1, 0.01).onChange(buildGrowth);
-collisionFolder.add(params, "collisionIterations", 0, 10, 1).onChange(buildGrowth);
-collisionFolder.add(params, "collisionRange", 1, 4, 0.05).onChange(buildGrowth);
+collisionFolder.add(params, "collisionIterations", 0, 15, 1).onChange(buildGrowth);
+collisionFolder.add(params, "collisionRange", 1, 10, 0.05).onChange(buildGrowth);
 
 const colorFolder = gui.addFolder("Color");
 colorFolder.addColor(params, "baseColor").onChange(buildGrowth);
