@@ -28,7 +28,7 @@ controls.enableDamping = true;
 controls.dampingFactor = 0.08;
 controls.enablePan = true;
 controls.minDistance = 1.5;
-controls.maxDistance = 18;
+controls.maxDistance = 80;
 
 const growthGroup = new THREE.Group();
 scene.add(growthGroup);
@@ -72,28 +72,200 @@ transformControls.addEventListener("objectChange", () => {
 scene.add(transformControls);
 scene.add(transformControls.getHelper());
 
-const bakedControls = [];
+const bakedControls = new TransformControls(camera, renderer.domElement);
+bakedControls.setMode("translate");
+bakedControls.setSpace("world");
+bakedControls.setSize(1.1);
+scene.add(bakedControls);
+bakedControls.visible = false;
+
+const bakeRaycaster = new THREE.Raycaster();
+const bakePointer = new THREE.Vector2();
+bakeRaycaster.params.Line.threshold = 0.2;
+
+const bakedSelection = [];
+let dragState = null;
+const selectionPivot = new THREE.Object3D();
+scene.add(selectionPivot);
+const bakedHelpers = new Map();
+
+function createBakedHelper(baked, geometry) {
+  if (!geometry.boundingSphere) {
+    geometry.computeBoundingSphere();
+  }
+}
+
+function buildBakedLine(geometry) {
+  const wireGeom = new THREE.WireframeGeometry(geometry);
+  const material = new THREE.LineBasicMaterial({
+    color: params.lineColor,
+    transparent: true,
+    opacity: params.lineOpacity,
+  });
+  return new THREE.LineSegments(wireGeom, material);
+}
+
+function buildBakedMesh(geometry, materialHint) {
+  const hasColors = !!geometry.getAttribute("color");
+  const material =
+    materialHint ||
+    new THREE.MeshStandardMaterial({
+      vertexColors: hasColors,
+      roughness: 0.5,
+      metalness: 0.08,
+      side: THREE.DoubleSide,
+    });
+  return new THREE.Mesh(geometry, material);
+}
+
+function replaceBakedObject(oldObj, newObj) {
+  newObj.position.copy(oldObj.position);
+  newObj.quaternion.copy(oldObj.quaternion);
+  newObj.scale.copy(oldObj.scale);
+  newObj.userData.isBaked = true;
+  newObj.userData.sourceGeometry = oldObj.userData.sourceGeometry || oldObj.geometry;
+  newObj.userData.sourceMaterial = oldObj.userData.sourceMaterial || oldObj.material;
+  newObj.userData.sourceMode = oldObj.userData.sourceMode || "mesh";
+  newObj.frustumCulled = false;
+
+  bakedHelpers.delete(oldObj);
+  bakedGroup.remove(oldObj);
+  bakedGroup.add(newObj);
+  createBakedHelper(newObj, newObj.userData.sourceGeometry || newObj.geometry);
+
+  const selectionIndex = bakedSelection.indexOf(oldObj);
+  if (selectionIndex >= 0) {
+    bakedSelection[selectionIndex] = newObj;
+  }
+  updateSelectionPivot();
+  return newObj;
+}
+
+function updateBakedDisplay() {
+  if (bakedGroup.children.length === 0) {
+    return;
+  }
+  const needsLines = params.mode === "lines";
+  const replacements = [];
+
+  for (const baked of bakedGroup.children) {
+    if (!baked.userData || !baked.userData.isBaked) {
+      continue;
+    }
+    if (needsLines && baked.isMesh) {
+      const sourceGeom = baked.userData.sourceGeometry || baked.geometry;
+      const line = buildBakedLine(sourceGeom);
+      line.userData = { ...baked.userData, sourceMode: "mesh" };
+      replacements.push({ oldObj: baked, newObj: line });
+    } else if (!needsLines && baked.isLineSegments && baked.userData.sourceMode === "mesh") {
+      const sourceGeom = baked.userData.sourceGeometry || baked.geometry;
+      const matHint =
+        baked.userData.sourceMaterial && baked.userData.sourceMaterial.clone
+          ? baked.userData.sourceMaterial.clone()
+          : null;
+      const mesh = buildBakedMesh(sourceGeom, matHint);
+      mesh.userData = { ...baked.userData };
+      replacements.push({ oldObj: baked, newObj: mesh });
+    }
+  }
+
+  for (const { oldObj, newObj } of replacements) {
+    replaceBakedObject(oldObj, newObj);
+  }
+}
+
+function updateSelectionPivot() {
+  if (bakedSelection.length === 0) {
+    bakedControls.detach();
+    bakedControls.visible = false;
+    transformControls.attach(attractorMesh);
+    transformControls.visible = true;
+    return;
+  }
+  const centroid = new THREE.Vector3();
+  for (const obj of bakedSelection) {
+    centroid.add(obj.position);
+  }
+  centroid.multiplyScalar(1 / bakedSelection.length);
+  selectionPivot.position.copy(centroid);
+  bakedControls.visible = true;
+  bakedControls.attach(selectionPivot);
+  bakedControls.updateMatrixWorld(true);
+  transformControls.detach();
+  transformControls.visible = false;
+}
+
+function setSelection(objects) {
+  bakedSelection.length = 0;
+  for (const obj of objects) {
+    if (obj && !bakedSelection.includes(obj)) {
+      bakedSelection.push(obj);
+    }
+  }
+  updateSelectionPivot();
+}
+
+function toggleSelection(object) {
+  const index = bakedSelection.indexOf(object);
+  if (index >= 0) {
+    bakedSelection.splice(index, 1);
+  } else {
+    bakedSelection.push(object);
+  }
+  updateSelectionPivot();
+}
+
+bakedControls.addEventListener("objectChange", () => {
+  if (!dragState) {
+    return;
+  }
+  const delta = selectionPivot.position.clone().sub(dragState.pivotStart);
+  for (let i = 0; i < bakedSelection.length; i += 1) {
+    const start = dragState.startPositions[i];
+    const obj = bakedSelection[i];
+    if (start && obj) {
+      obj.position.copy(start).add(delta);
+    }
+  }
+});
+
+bakedControls.addEventListener("dragging-changed", (event) => {
+  controls.enabled = !event.value;
+  if (event.value) {
+    dragState = {
+      pivotStart: selectionPivot.position.clone(),
+      startPositions: bakedSelection.map((obj) => obj.position.clone()),
+    };
+  } else {
+    dragState = null;
+  }
+});
 
 const axesHelper = new THREE.AxesHelper(2.5);
 axesHelper.material.transparent = true;
 axesHelper.material.opacity = 0.35;
 scene.add(axesHelper);
 
-const gridSize = 20;
-const minorDivisions = 40;
-const majorDivisions = 10;
 const DEFAULT_SIM_SEGMENTS_CAP = 240;
 
+const gridSize = 2000;
+const minorDivisions = 400;
+const majorDivisions = 100;
+
 const minorGrid = new THREE.GridHelper(gridSize, minorDivisions, "#1a1f24", "#1a1f24");
-minorGrid.position.y = -0.4;
-minorGrid.material.opacity = 0.4;
+minorGrid.position.y = 0;
+minorGrid.material.opacity = 0.25;
 minorGrid.material.transparent = true;
+minorGrid.material.depthWrite = false;
+minorGrid.renderOrder = -1;
 scene.add(minorGrid);
 
 const majorGrid = new THREE.GridHelper(gridSize, majorDivisions, "#2a3238", "#2a3238");
-majorGrid.position.y = -0.399;
-majorGrid.material.opacity = 0.7;
+majorGrid.position.y = 0;
+majorGrid.material.opacity = 0.45;
 majorGrid.material.transparent = true;
+majorGrid.material.depthWrite = false;
+majorGrid.renderOrder = -1;
 scene.add(majorGrid);
 
 const params = {
@@ -135,6 +307,8 @@ const params = {
   deformableZone: 1,
   growthFalloff: 1.2,
   autoRotate: false,
+  bakeBaseOffset: 1.35,
+  bakeSpacing: 1.872,
 };
 
 let growthMesh = null;
@@ -950,6 +1124,7 @@ function buildGrowth() {
   } else {
     buildLineGrowth(displayRings);
   }
+  updateBakedDisplay();
 }
 
 function bakeGeometry() {
@@ -962,6 +1137,7 @@ function bakeGeometry() {
   }
 
   const geometry = source.geometry.clone();
+  geometry.computeBoundingSphere();
   const material = source.material.clone();
   let baked = null;
 
@@ -976,32 +1152,48 @@ function bakeGeometry() {
   baked.quaternion.copy(source.getWorldQuaternion(new THREE.Quaternion()));
   baked.scale.copy(source.getWorldScale(new THREE.Vector3()));
 
-  const offset = params.ringRadius * 2.5 + bakedGroup.children.length * params.ringRadius * 1.2;
+  baked.userData.bakeIndex = bakedGroup.children.length;
+  const baseOffset = params.ringRadius * 2.5 * params.bakeBaseOffset;
+  const baseSpacing = params.ringRadius * 1.2 * params.bakeSpacing;
+  const offset = baseOffset + baked.userData.bakeIndex * baseSpacing;
   baked.position.x += offset;
 
+  baked.userData.isBaked = true;
+  baked.userData.sourceGeometry = geometry;
+  baked.userData.sourceMaterial = material;
+  baked.userData.sourceMode = source.isLineSegments ? "lines" : "mesh";
+  baked.frustumCulled = false;
   bakedGroup.add(baked);
+  baked.updateMatrixWorld(true);
+  createBakedHelper(baked, geometry);
+  setSelection([baked]);
+}
 
-  const control = new TransformControls(camera, renderer.domElement);
-  control.setMode("translate");
-  control.setSpace("world");
-  control.setSize(1.1);
-  control.attach(baked);
-  control.addEventListener("dragging-changed", (event) => {
-    controls.enabled = !event.value;
-  });
-  scene.add(control);
-  bakedControls.push(control);
+function updateBakedOffsets() {
+  if (bakedGroup.children.length === 0) {
+    return;
+  }
+  const baseOffset = params.ringRadius * 2.5 * params.bakeBaseOffset;
+  const baseSpacing = params.ringRadius * 1.2 * params.bakeSpacing;
+
+  for (const baked of bakedGroup.children) {
+    if (!baked.userData || !baked.userData.isBaked) {
+      continue;
+    }
+    const index = baked.userData.bakeIndex ?? 0;
+    baked.position.x = baseOffset + index * baseSpacing;
+  }
+  updateSelectionPivot();
 }
 
 function clearBakes() {
-  for (const control of bakedControls) {
-    control.detach();
-    scene.remove(control);
-  }
-  bakedControls.length = 0;
+  bakedSelection.length = 0;
+  bakedControls.detach();
+  bakedControls.visible = false;
 
   while (bakedGroup.children.length > 0) {
     const child = bakedGroup.children.pop();
+    bakedHelpers.delete(child);
     if (child.geometry) {
       child.geometry.dispose();
     }
@@ -1014,6 +1206,7 @@ function clearBakes() {
 function deleteLastBake() {
   const last = bakedGroup.children.pop();
   if (last) {
+    bakedHelpers.delete(last);
     if (last.geometry) {
       last.geometry.dispose();
     }
@@ -1021,11 +1214,11 @@ function deleteLastBake() {
       last.material.dispose();
     }
   }
-  const control = bakedControls.pop();
-  if (control) {
-    control.detach();
-    scene.remove(control);
+  const index = bakedSelection.indexOf(last);
+  if (index >= 0) {
+    bakedSelection.splice(index, 1);
   }
+  updateSelectionPivot();
 }
 
 function mergeAndSmoothMeshes() {
@@ -1517,7 +1710,7 @@ function smoothLaplacian(geometry, iterations, lambda) {
 
 
 
-const gui = new GUI({ width: 320 });
+const gui = new GUI({ width: 250 });
 const growthFolder = gui.addFolder("Growth");
 growthFolder.add(params, "mode", ["mesh", "lines"]).onChange(buildGrowth);
 growthFolder.add(params, "segments", 24, 400, 1).onChange(buildGrowth);
@@ -1573,6 +1766,8 @@ viewFolder.add(params, "autoRotate");
 viewFolder.add({ bakeGeometry }, "bakeGeometry");
 viewFolder.add({ deleteLastBake }, "deleteLastBake");
 viewFolder.add({ clearBakes }, "clearBakes");
+viewFolder.add(params, "bakeBaseOffset", 0.5, 4, 0.05).onChange(updateBakedOffsets);
+viewFolder.add(params, "bakeSpacing", 0.5, 4, 0.05).onChange(updateBakedOffsets);
 
 gui.close();
 
@@ -1597,6 +1792,93 @@ function animate() {
   renderer.render(scene, camera);
   controls.update();
 }
+
+function onBakePointerDown(event) {
+  if (event.button !== 0) {
+    return;
+  }
+  if (event.target && event.target.closest && event.target.closest(".lil-gui")) {
+    return;
+  }
+  if (bakedControls.dragging) {
+    return;
+  }
+  const rect = renderer.domElement.getBoundingClientRect();
+  bakePointer.x = ((event.clientX - rect.left) / rect.width) * 2 - 1;
+  bakePointer.y = -((event.clientY - rect.top) / rect.height) * 2 + 1;
+  bakeRaycaster.setFromCamera(bakePointer, camera);
+  const hits = bakeRaycaster.intersectObjects(bakedGroup.children, true);
+  let picked = null;
+  if (hits.length > 0) {
+    picked = hits[0].object;
+    if (picked.userData.bakeTarget) {
+      picked = picked.userData.bakeTarget;
+    } else {
+      while (picked && !picked.userData.isBaked && picked.parent) {
+        picked = picked.parent;
+      }
+    }
+  } else {
+    let closest = null;
+    let closestDist = Infinity;
+    const screenPos = new THREE.Vector3();
+    const offsetPos = new THREE.Vector3();
+    const cameraRight = new THREE.Vector3();
+    cameraRight.setFromMatrixColumn(camera.matrixWorld, 0);
+
+    for (const baked of bakedGroup.children) {
+      if (!baked.userData || !baked.userData.isBaked) {
+        continue;
+      }
+      const sourceGeom = baked.userData.sourceGeometry || baked.geometry;
+      if (!sourceGeom || !sourceGeom.boundingSphere) {
+        continue;
+      }
+      baked.getWorldPosition(screenPos);
+      screenPos.project(camera);
+      const sx = ((screenPos.x + 1) * 0.5) * rect.width + rect.left;
+      const sy = ((-screenPos.y + 1) * 0.5) * rect.height + rect.top;
+
+      const worldRadius =
+        sourceGeom.boundingSphere.radius *
+        Math.max(baked.scale.x, baked.scale.y, baked.scale.z);
+      offsetPos.copy(cameraRight).multiplyScalar(worldRadius).add(baked.position);
+      offsetPos.project(camera);
+      const sx2 = ((offsetPos.x + 1) * 0.5) * rect.width + rect.left;
+      const sy2 = ((-offsetPos.y + 1) * 0.5) * rect.height + rect.top;
+      const screenRadius = Math.max(12, Math.hypot(sx2 - sx, sy2 - sy));
+
+      const dx = sx - event.clientX;
+      const dy = sy - event.clientY;
+      const dist = Math.sqrt(dx * dx + dy * dy);
+
+      if (dist <= screenRadius * 1.1 && dist < closestDist) {
+        closestDist = dist;
+        closest = baked;
+      }
+    }
+    if (closest) {
+      picked = closest;
+    }
+  }
+
+  if (picked && picked.userData && picked.userData.isBaked) {
+    if (event.shiftKey) {
+      toggleSelection(picked);
+    } else {
+      setSelection([picked]);
+    }
+    return;
+  }
+
+  if (!event.shiftKey) {
+    bakedSelection.length = 0;
+    bakedControls.detach();
+    bakedControls.visible = false;
+  }
+}
+
+window.addEventListener("pointerdown", onBakePointerDown, true);
 
 buildGrowth();
 animate();
