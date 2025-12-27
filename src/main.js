@@ -33,6 +33,9 @@ controls.maxDistance = 18;
 const growthGroup = new THREE.Group();
 scene.add(growthGroup);
 
+const bakedGroup = new THREE.Group();
+scene.add(bakedGroup);
+
 const ambientLight = new THREE.AmbientLight(0xffffff, 0.6);
 scene.add(ambientLight);
 
@@ -68,6 +71,8 @@ transformControls.addEventListener("objectChange", () => {
 });
 scene.add(transformControls);
 scene.add(transformControls.getHelper());
+
+const bakedControls = [];
 
 const axesHelper = new THREE.AxesHelper(2.5);
 axesHelper.material.transparent = true;
@@ -115,8 +120,6 @@ const params = {
   attractorRadius: 0.1,
   attractorStrength: 0.45,
   attractorBias: 0.15,
-  meshThickness: 0,
-  thicknessRadius: 1,
   meshOpacity: 1,
   lineOpacity: 1,
   lineColor: "#ffffff",
@@ -822,8 +825,6 @@ function buildMeshGrowth(rings) {
   const segments = rings[0] ? rings[0].points.length : Math.max(3, params.segments);
   const baseColor = new THREE.Color(params.baseColor);
   const ridgeColor = new THREE.Color(params.ridgeColor);
-  const thickness = Math.max(0, params.meshThickness);
-
   const positions = [];
   const colors = [];
   const indices = [];
@@ -833,10 +834,6 @@ function buildMeshGrowth(rings) {
 
   function outerIndex(r, s) {
     return r * vertexPerRing + s;
-  }
-
-  function innerIndex(r, s) {
-    return totalRings * vertexPerRing + r * vertexPerRing + s;
   }
 
   for (let i = 0; i < rings.length; i += 1) {
@@ -853,11 +850,8 @@ function buildMeshGrowth(rings) {
       }
       radial.normalize();
 
-      const outer = point.clone().addScaledVector(radial, thickness * 0.5);
-      const inner = point.clone().addScaledVector(radial, -thickness * 0.5);
-
       const visibility = mask[j] || 0;
-      positions.push(outer.x, outer.y, outer.z);
+      positions.push(point.x, point.y, point.z);
       colors.push(
         color.r * visibility,
         color.g * visibility,
@@ -865,23 +859,6 @@ function buildMeshGrowth(rings) {
       );
     }
 
-    for (let j = 0; j < segments; j += 1) {
-      const point = ring[j];
-      const radial = point.clone().sub(center);
-      if (radial.lengthSq() < 1e-6) {
-        radial.set(1, 0, 0);
-      }
-      radial.normalize();
-
-      const inner = point.clone().addScaledVector(radial, -thickness * 0.5);
-      const visibility = mask[j] || 0;
-      positions.push(inner.x, inner.y, inner.z);
-      colors.push(
-        color.r * visibility,
-        color.g * visibility,
-        color.b * visibility
-      );
-    }
   }
 
   for (let r = 0; r < totalRings - 1; r += 1) {
@@ -900,34 +877,9 @@ function buildMeshGrowth(rings) {
       const d = outerIndex(r + 1, next);
       indices.push(a, c, b, b, c, d);
 
-      const ia = innerIndex(r, s);
-      const ib = innerIndex(r, next);
-      const ic = innerIndex(r + 1, s);
-      const id = innerIndex(r + 1, next);
-      indices.push(ia, ib, ic, ib, id, ic);
     }
   }
 
-  const capRings = [0, totalRings - 1];
-  for (const r of capRings) {
-    for (let s = 0; s < segments; s += 1) {
-      const next = (s + 1) % segments;
-      const maskA = (rings[r].mask || [])[s] || 0;
-      const maskB = (rings[r].mask || [])[next] || 0;
-      if (maskA <= 0.02 && maskB <= 0.02) {
-        continue;
-      }
-      const a = outerIndex(r, s);
-      const b = outerIndex(r, next);
-      const c = innerIndex(r, s);
-      const d = innerIndex(r, next);
-      if (r === 0) {
-        indices.push(a, b, c, b, d, c);
-      } else {
-        indices.push(a, c, b, b, c, d);
-      }
-    }
-  }
 
   const geometry = new THREE.BufferGeometry();
   geometry.setAttribute(
@@ -1000,6 +952,82 @@ function buildGrowth() {
   }
 }
 
+function bakeGeometry() {
+  const source =
+    params.mode === "lines"
+      ? growthLines || baseRingMesh
+      : mergedMesh || growthMesh;
+  if (!source || !source.geometry || !source.material) {
+    return;
+  }
+
+  const geometry = source.geometry.clone();
+  const material = source.material.clone();
+  let baked = null;
+
+  if (source.isLineSegments) {
+    baked = new THREE.LineSegments(geometry, material);
+  } else {
+    baked = new THREE.Mesh(geometry, material);
+  }
+
+  source.updateMatrixWorld(true);
+  baked.position.copy(source.getWorldPosition(new THREE.Vector3()));
+  baked.quaternion.copy(source.getWorldQuaternion(new THREE.Quaternion()));
+  baked.scale.copy(source.getWorldScale(new THREE.Vector3()));
+
+  const offset = params.ringRadius * 2.5 + bakedGroup.children.length * params.ringRadius * 1.2;
+  baked.position.x += offset;
+
+  bakedGroup.add(baked);
+
+  const control = new TransformControls(camera, renderer.domElement);
+  control.setMode("translate");
+  control.setSpace("world");
+  control.setSize(1.1);
+  control.attach(baked);
+  control.addEventListener("dragging-changed", (event) => {
+    controls.enabled = !event.value;
+  });
+  scene.add(control);
+  bakedControls.push(control);
+}
+
+function clearBakes() {
+  for (const control of bakedControls) {
+    control.detach();
+    scene.remove(control);
+  }
+  bakedControls.length = 0;
+
+  while (bakedGroup.children.length > 0) {
+    const child = bakedGroup.children.pop();
+    if (child.geometry) {
+      child.geometry.dispose();
+    }
+    if (child.material) {
+      child.material.dispose();
+    }
+  }
+}
+
+function deleteLastBake() {
+  const last = bakedGroup.children.pop();
+  if (last) {
+    if (last.geometry) {
+      last.geometry.dispose();
+    }
+    if (last.material) {
+      last.material.dispose();
+    }
+  }
+  const control = bakedControls.pop();
+  if (control) {
+    control.detach();
+    scene.remove(control);
+  }
+}
+
 function mergeAndSmoothMeshes() {
   if (!growthMesh || !baseRingMesh) {
     return;
@@ -1032,13 +1060,8 @@ function mergeAndSmoothMeshes() {
   const seamWeld = Math.min(0.015, seamRadius * 0.1);
   const seamWelded = BufferGeometryUtils.mergeVertices(welded, seamWeld);
   flipTriangleWinding(seamWelded);
-  const thickened = applyThickness(
-    seamWelded,
-    params.meshThickness,
-    params.thicknessRadius
-  );
-  applyVerticalGradient(thickened, params.baseColor, params.ridgeColor);
-  thickened.computeVertexNormals();
+  applyVerticalGradient(seamWelded, params.baseColor, params.ridgeColor);
+  seamWelded.computeVertexNormals();
 
   const material = new THREE.MeshStandardMaterial({
     vertexColors: true,
@@ -1049,7 +1072,7 @@ function mergeAndSmoothMeshes() {
     side: THREE.DoubleSide,
   });
 
-  mergedMesh = new THREE.Mesh(thickened, material);
+  mergedMesh = new THREE.Mesh(seamWelded, material);
   growthGroup.add(mergedMesh);
 
   growthGroup.remove(growthMesh);
@@ -1531,11 +1554,8 @@ attractorFolder
 attractorFolder.add(params, "attractorBias", -0.2, 0.6, 0.01).onChange(buildGrowth);
 
 const materialFolder = gui.addFolder("Material");
-materialFolder.add(params, "meshThickness", 0, 0.05, 0.001).onChange(buildGrowth);
-materialFolder.add(params, "thicknessRadius", 0.1, 2, 0.01).onChange(buildGrowth);
 materialFolder.add(params, "meshOpacity", 0.2, 1, 0.01).onChange(buildGrowth);
 materialFolder.add(params, "lineOpacity", 0.1, 1, 0.01).onChange(buildGrowth);
-materialFolder.addColor(params, "lineColor").onChange(buildGrowth);
 materialFolder.add(params, "smoothnessStrength", 1, 15, 1).onChange(buildGrowth);
 
 const collisionFolder = gui.addFolder("Collision");
@@ -1546,9 +1566,13 @@ collisionFolder.add(params, "collisionRange", 1, 10, 0.05).onChange(buildGrowth)
 const colorFolder = gui.addFolder("Color");
 colorFolder.addColor(params, "baseColor").onChange(buildGrowth);
 colorFolder.addColor(params, "ridgeColor").onChange(buildGrowth);
+colorFolder.addColor(params, "lineColor").onChange(buildGrowth);
 
 const viewFolder = gui.addFolder("View");
 viewFolder.add(params, "autoRotate");
+viewFolder.add({ bakeGeometry }, "bakeGeometry");
+viewFolder.add({ deleteLastBake }, "deleteLastBake");
+viewFolder.add({ clearBakes }, "clearBakes");
 
 gui.close();
 
