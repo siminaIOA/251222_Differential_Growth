@@ -284,6 +284,8 @@ const params = {
   ridgeLift: 0.18,
   ridgeSharpness: 1.4,
   curl: 0.65,
+  rimCurl: 0.35,
+  rimCurlWidth: 0.25,
   bowl: -0.2,
   taper: 0.4,
   attractorX: 0.6,
@@ -526,6 +528,12 @@ function generateRings() {
 
       const curlAngle = params.curl * (t - 0.15);
       point.applyAxisAngle(radial, curlAngle);
+
+      const rimWidth = Math.max(0.05, params.rimCurlWidth);
+      const rimStart = Math.max(0, 1 - rimWidth);
+      const rimFactor = Math.min(1, Math.max(0, (t - rimStart) / rimWidth));
+      const rimCurlAngle = params.rimCurl * rimFactor * (0.2 + t);
+      point.applyAxisAngle(radial, rimCurlAngle);
       point.y -= params.bowl * radial.length() * radial.length() * 0.35;
 
       if (params.attractorStrength > 0 && influence > 0.001) {
@@ -722,6 +730,7 @@ function clearGrowth() {
     mergedMesh = null;
   }
 }
+
 
 function updateBaseRing() {
   if (baseRingMesh) {
@@ -1723,7 +1732,7 @@ growthFolder.add(params, "growthFalloff", 0.2, 3, 0.05).onChange(buildGrowth);
 const baseFolder = gui.addFolder("Base");
 baseFolder.add(params, "ringRadius", 0.2, 3, 0.05).onChange(buildGrowth);
 baseFolder.add(params, "ringSegments", 60, 720, 1).onChange(buildGrowth);
-baseFolder.add(params, "extrusionWidth", 0.1, 0.3, 0.01).onChange(buildGrowth);
+baseFolder.add(params, "extrusionWidth", 0.1, 0.75, 0.01).onChange(buildGrowth);
 baseFolder.add(params, "baseQuadDivisions", 1, 10, 1).onChange(buildGrowth);
 baseFolder.add(params, "baseCullFalloff", 0.05, 1.5, 0.01).onChange(buildGrowth);
 baseFolder.add(params, "deformableZone", 0.3, 2, 0.05).onChange(buildGrowth);
@@ -1736,6 +1745,8 @@ leafFolder.add(params, "leafGrowth", 0, 3, 0.05).onChange(buildGrowth);
 leafFolder.add(params, "ridgeLift", 0, 0.6, 0.01).onChange(buildGrowth);
 leafFolder.add(params, "ridgeSharpness", 0.2, 3, 0.05).onChange(buildGrowth);
 leafFolder.add(params, "curl", -0.85, 0.85, 0.01).onChange(buildGrowth);
+leafFolder.add(params, "rimCurl", -1.2, 1.2, 0.01).onChange(buildGrowth);
+leafFolder.add(params, "rimCurlWidth", 0.05, 0.6, 0.01).onChange(buildGrowth);
 leafFolder.add(params, "bowl", -0.3, -0.05, 0.01).onChange(buildGrowth);
 leafFolder.add(params, "taper", 0, 1.2, 0.01).onChange(buildGrowth);
 
@@ -1770,6 +1781,52 @@ viewFolder.add(params, "bakeBaseOffset", 0.5, 4, 0.05).onChange(updateBakedOffse
 viewFolder.add(params, "bakeSpacing", 0.5, 4, 0.05).onChange(updateBakedOffsets);
 
 gui.close();
+
+const guiRoot = gui.domElement;
+let guiDrag = null;
+
+const guiDragBar = document.createElement("div");
+guiDragBar.className = "gui-drag-bar";
+guiDragBar.textContent = "Drag Me";
+guiRoot.prepend(guiDragBar);
+
+function onGuiPointerDown(event) {
+  if (!event.isPrimary) {
+    return;
+  }
+  if (!event.target.classList.contains("gui-drag-bar")) {
+    return;
+  }
+  event.preventDefault();
+  event.stopPropagation();
+  const rect = guiRoot.getBoundingClientRect();
+  guiRoot.classList.add("is-dragging");
+  guiDrag = {
+    offsetX: event.clientX - rect.left,
+    offsetY: event.clientY - rect.top,
+  };
+  guiRoot.style.right = "auto";
+  window.addEventListener("pointermove", onGuiPointerMove);
+  window.addEventListener("pointerup", onGuiPointerUp, { once: true });
+}
+
+function onGuiPointerMove(event) {
+  if (!guiDrag) {
+    return;
+  }
+  const x = event.clientX - guiDrag.offsetX;
+  const y = event.clientY - guiDrag.offsetY;
+  guiRoot.style.left = `${Math.max(0, x)}px`;
+  guiRoot.style.top = `${Math.max(0, y)}px`;
+}
+
+function onGuiPointerUp() {
+  guiRoot.classList.remove("is-dragging");
+  guiDrag = null;
+  window.removeEventListener("pointermove", onGuiPointerMove);
+}
+
+guiDragBar.addEventListener("pointerdown", onGuiPointerDown);
 
 function onResize() {
   camera.aspect = window.innerWidth / window.innerHeight;
