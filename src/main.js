@@ -324,7 +324,7 @@ const params = {
   attractorRadius: 0.1,
   attractorStrength: 0.55,
   attractorBias: 0.5,
-  meshOpacity: 1,
+  meshThickness: 0,
   lineColor: "#ffffff",
   smoothnessStrength: 8,
   collisionStrength: 0,
@@ -1105,7 +1105,7 @@ function buildMeshGrowth(rings) {
   const material = new THREE.MeshStandardMaterial({
     vertexColors: true,
     transparent: true,
-    opacity: params.meshOpacity,
+    opacity: 1,
     roughness: 0.35,
     metalness: 0.35,
     side: THREE.DoubleSide,
@@ -1291,9 +1291,10 @@ function mergeAndSmoothMeshes() {
   enforceRingRoundness(welded);
   const seamWeld = Math.min(0.015, seamRadius * 0.1);
   const seamWelded = BufferGeometryUtils.mergeVertices(welded, seamWeld);
-  flipTriangleWinding(seamWelded);
-  applyVerticalGradient(seamWelded, params.baseColor, params.ridgeColor);
-  seamWelded.computeVertexNormals();
+  const thickened = applyThickness(seamWelded, params.meshThickness, 1);
+  flipTriangleWinding(thickened);
+  applyVerticalGradient(thickened, params.baseColor, params.ridgeColor);
+  thickened.computeVertexNormals();
 
   const material = new THREE.MeshStandardMaterial({
     vertexColors: true,
@@ -1304,7 +1305,7 @@ function mergeAndSmoothMeshes() {
     side: THREE.DoubleSide,
   });
 
-  mergedMesh = new THREE.Mesh(seamWelded, material);
+  mergedMesh = new THREE.Mesh(thickened, material);
   mergedMesh.castShadow = true;
   mergedMesh.receiveShadow = true;
   growthGroup.add(mergedMesh);
@@ -1789,7 +1790,7 @@ attractorFolder
 attractorFolder.add(params, "attractorBias", 0, 0.7, 0.01).onChange(buildGrowth);
 
 const materialFolder = gui.addFolder("Material");
-materialFolder.add(params, "meshOpacity", 0.2, 1, 0.01).onChange(buildGrowth);
+materialFolder.add(params, "meshThickness", 0, 0.2, 0.005).onChange(buildGrowth);
 materialFolder.add(params, "smoothnessStrength", 1, 20, 1).onChange(buildGrowth);
 
 const collisionFolder = gui.addFolder("Collision");
