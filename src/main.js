@@ -14,12 +14,14 @@ const camera = new THREE.PerspectiveCamera(
   0.1,
   100
 );
-camera.position.set(4, 3, 6);
+camera.position.set(6.36, 2.6, -6.36);
 
 const renderer = new THREE.WebGLRenderer({ antialias: true });
 renderer.setSize(window.innerWidth, window.innerHeight);
 renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
 renderer.outputColorSpace = THREE.SRGBColorSpace;
+renderer.shadowMap.enabled = true;
+renderer.shadowMap.type = THREE.PCFSoftShadowMap;
 
 document.getElementById("app").appendChild(renderer.domElement);
 
@@ -29,6 +31,8 @@ controls.dampingFactor = 0.08;
 controls.enablePan = true;
 controls.minDistance = 1.5;
 controls.maxDistance = 80;
+controls.target.set(0, 1.6, 0);
+controls.update();
 
 const growthGroup = new THREE.Group();
 scene.add(growthGroup);
@@ -36,16 +40,43 @@ scene.add(growthGroup);
 const bakedGroup = new THREE.Group();
 scene.add(bakedGroup);
 
-const ambientLight = new THREE.AmbientLight(0xffffff, 0.6);
+const ambientLight = new THREE.AmbientLight(0xffffff, 0.35);
 scene.add(ambientLight);
 
-const keyLight = new THREE.DirectionalLight(0xffffff, 1.0);
-keyLight.position.set(5, 6, 4);
+const keyLight = new THREE.DirectionalLight(0xffffff, 1.1);
+keyLight.position.set(6, 8, 5);
+keyLight.castShadow = true;
+keyLight.shadow.mapSize.set(2048, 2048);
+keyLight.shadow.camera.near = 0.5;
+keyLight.shadow.camera.far = 40;
+keyLight.shadow.camera.left = -10;
+keyLight.shadow.camera.right = 10;
+keyLight.shadow.camera.top = 10;
+keyLight.shadow.camera.bottom = -10;
+keyLight.shadow.bias = -0.0003;
+keyLight.shadow.normalBias = 0.02;
+keyLight.shadow.radius = 6;
 scene.add(keyLight);
+scene.add(keyLight.target);
 
-const fillLight = new THREE.DirectionalLight(0xffffff, 0.45);
-fillLight.position.set(-4, 2, -6);
+const fillLight = new THREE.DirectionalLight(0x8aa6ff, 0.35);
+fillLight.position.set(-6, 3, -6);
 scene.add(fillLight);
+
+const rimLight = new THREE.DirectionalLight(0xffd6b3, 0.25);
+rimLight.position.set(0, 6, -8);
+scene.add(rimLight);
+
+const shadowPlane = new THREE.Mesh(
+  new THREE.PlaneGeometry(200, 200),
+  new THREE.ShadowMaterial({ opacity: 0.18 })
+);
+shadowPlane.rotation.x = -Math.PI / 2;
+shadowPlane.position.y = 0;
+shadowPlane.receiveShadow = true;
+shadowPlane.material.depthWrite = false;
+shadowPlane.renderOrder = -2;
+scene.add(shadowPlane);
 
 const attractorMesh = new THREE.Mesh(
   new THREE.SphereGeometry(1, 32, 32),
@@ -111,8 +142,8 @@ function buildBakedMesh(geometry, materialHint) {
     materialHint ||
     new THREE.MeshStandardMaterial({
       vertexColors: hasColors,
-      roughness: 0.5,
-      metalness: 0.08,
+      roughness: 0.3,
+      metalness: 0.45,
       side: THREE.DoubleSide,
     });
   return new THREE.Mesh(geometry, material);
@@ -254,7 +285,7 @@ const majorDivisions = 100;
 
 const minorGrid = new THREE.GridHelper(gridSize, minorDivisions, "#1a1f24", "#1a1f24");
 minorGrid.position.y = 0;
-minorGrid.material.opacity = 0.25;
+minorGrid.material.opacity = 0.12;
 minorGrid.material.transparent = true;
 minorGrid.material.depthWrite = false;
 minorGrid.renderOrder = -1;
@@ -262,7 +293,7 @@ scene.add(minorGrid);
 
 const majorGrid = new THREE.GridHelper(gridSize, majorDivisions, "#2a3238", "#2a3238");
 majorGrid.position.y = 0;
-majorGrid.material.opacity = 0.45;
+majorGrid.material.opacity = 0.2;
 majorGrid.material.transparent = true;
 majorGrid.material.depthWrite = false;
 majorGrid.renderOrder = -1;
@@ -270,44 +301,44 @@ scene.add(majorGrid);
 
 const params = {
   mode: "mesh",
-  segments: 140,
-  simSegmentsCap: DEFAULT_SIM_SEGMENTS_CAP,
+  segments: 300,
+  simSegmentsCap: 150,
   iterations: 30,
-  stepLength: 0.11,
-  ringRadius: 1.2,
-  ringSegments: 240,
-  twist: 2.4,
-  ruffleAmplitude: 0.35,
-  ruffleFrequency: 2.6,
-  ruffleGrowth: 1.1,
-  leafGrowth: 1.35,
-  ridgeLift: 0.18,
-  ridgeSharpness: 1.4,
-  curl: 0.65,
-  rimCurl: 0.35,
-  rimCurlWidth: 0.25,
-  bowl: -0.2,
-  taper: 0.4,
-  attractorX: 0.6,
-  attractorY: 1.0,
-  attractorZ: -0.4,
+  stepLength: 0.2,
+  ringRadius: 1.5,
+  ringSegments: 60,
+  twist: 1,
+  ruffleAmplitude: 0.3,
+  ruffleFrequency: 0.5,
+  ruffleGrowth: 0,
+  leafGrowth: 1.45,
+  ridgeLift: 0,
+  ridgeSharpness: 0.2,
+  curl: 0.85,
+  rimCurl: 1.2,
+  rimCurlWidth: 0.05,
+  bowl: -0.15,
+  taper: 0,
+  attractorX: 0,
+  attractorY: 2.0,
+  attractorZ: 0,
   attractorRadius: 0.1,
-  attractorStrength: 0.45,
-  attractorBias: 0.15,
+  attractorStrength: 0.2,
+  attractorBias: 0.5,
   meshOpacity: 1,
   lineOpacity: 1,
   lineColor: "#ffffff",
-  smoothnessStrength: 3,
-  collisionStrength: 0.6,
-  collisionIterations: 2,
-  collisionRange: 1.8,
+  smoothnessStrength: 5,
+  collisionStrength: 0,
+  collisionIterations: 15,
+  collisionRange: 10,
   ridgeColor: "#ff0000",
-  baseColor: "#00a6ff",
-  extrusionWidth: 0.25,
-  baseQuadDivisions: 6,
-  baseCullFalloff: 0.3,
-  deformableZone: 1,
-  growthFalloff: 1.2,
+  baseColor: "#4400ff",
+  extrusionWidth: 0.35,
+  baseQuadDivisions: 4,
+  baseCullFalloff: 1.25,
+  deformableZone: 5,
+  growthFalloff: 0.4,
   autoRotate: false,
   bakeBaseOffset: 1.35,
   bakeSpacing: 1.872,
@@ -768,6 +799,9 @@ function updateBaseRing() {
   const cutGrid = Array.from({ length: heightSegments }, () =>
     new Array(radialSegments).fill(false)
   );
+  const displayGrid = Array.from({ length: heightSegments }, () =>
+    new Array(radialSegments).fill(true)
+  );
   const baseColor = new THREE.Color(params.baseColor);
   const ridgeColor = new THREE.Color(params.ridgeColor);
   let hasKept = false;
@@ -813,12 +847,12 @@ function updateBaseRing() {
   const upAxis = new THREE.Vector3(0, 1, 0);
   const sideAxis = new THREE.Vector3(1, 0, 0);
 
-  function buildBaseFromGrid() {
+  function buildBaseFromGrid(grid, collectBoundary, buildGeometry) {
     for (let h = 0; h < heightSegments; h += 1) {
       const y1 = -width / 2 + (width * h) / heightSegments;
       const y2 = -width / 2 + (width * (h + 1)) / heightSegments;
       for (let s = 0; s < radialSegments; s += 1) {
-        if (!keepGrid[h][s]) {
+        if (!grid[h][s]) {
           continue;
         }
         const next = (s + 1) % radialSegments;
@@ -842,79 +876,71 @@ function updateBaseRing() {
         v3.applyQuaternion(baseRotation);
         v4.applyQuaternion(baseRotation);
 
-        if (params.mode === "mesh") {
-          const indexOffset = positions.length / 3;
-          positions.push(
-            v1.x, v1.y, v1.z,
-            v2.x, v2.y, v2.z,
-            v3.x, v3.y, v3.z,
-            v4.x, v4.y, v4.z
-          );
-          const t1 = Math.min(1, Math.max(0, (v1.x + width / 2) / width));
-          const t2 = Math.min(1, Math.max(0, (v2.x + width / 2) / width));
-          const t3 = Math.min(1, Math.max(0, (v3.x + width / 2) / width));
-          const t4 = Math.min(1, Math.max(0, (v4.x + width / 2) / width));
-          const c1 = baseColor.clone().lerp(ridgeColor, t1);
-          const c2 = baseColor.clone().lerp(ridgeColor, t2);
-          const c3 = baseColor.clone().lerp(ridgeColor, t3);
-          const c4 = baseColor.clone().lerp(ridgeColor, t4);
-          colors.push(
-            c1.r, c1.g, c1.b,
-            c2.r, c2.g, c2.b,
-            c3.r, c3.g, c3.b,
-            c4.r, c4.g, c4.b
-          );
-          indices.push(
-            indexOffset, indexOffset + 1, indexOffset + 2,
-            indexOffset, indexOffset + 2, indexOffset + 3
-          );
-        } else {
-          linePositions.push(
-            v1.x, v1.y, v1.z, v2.x, v2.y, v2.z,
-            v2.x, v2.y, v2.z, v3.x, v3.y, v3.z,
-            v3.x, v3.y, v3.z, v4.x, v4.y, v4.z,
-            v4.x, v4.y, v4.z, v1.x, v1.y, v1.z
-          );
+        if (buildGeometry) {
+          if (params.mode === "mesh") {
+            const indexOffset = positions.length / 3;
+            positions.push(
+              v1.x, v1.y, v1.z,
+              v2.x, v2.y, v2.z,
+              v3.x, v3.y, v3.z,
+              v4.x, v4.y, v4.z
+            );
+            const t1 = Math.min(1, Math.max(0, (v1.x + width / 2) / width));
+            const t2 = Math.min(1, Math.max(0, (v2.x + width / 2) / width));
+            const t3 = Math.min(1, Math.max(0, (v3.x + width / 2) / width));
+            const t4 = Math.min(1, Math.max(0, (v4.x + width / 2) / width));
+            const c1 = baseColor.clone().lerp(ridgeColor, t1);
+            const c2 = baseColor.clone().lerp(ridgeColor, t2);
+            const c3 = baseColor.clone().lerp(ridgeColor, t3);
+            const c4 = baseColor.clone().lerp(ridgeColor, t4);
+            colors.push(
+              c1.r, c1.g, c1.b,
+              c2.r, c2.g, c2.b,
+              c3.r, c3.g, c3.b,
+              c4.r, c4.g, c4.b
+            );
+            indices.push(
+              indexOffset, indexOffset + 1, indexOffset + 2,
+              indexOffset, indexOffset + 2, indexOffset + 3
+            );
+          } else {
+            linePositions.push(
+              v1.x, v1.y, v1.z, v2.x, v2.y, v2.z,
+              v2.x, v2.y, v2.z, v3.x, v3.y, v3.z,
+              v3.x, v3.y, v3.z, v4.x, v4.y, v4.z,
+              v4.x, v4.y, v4.z, v1.x, v1.y, v1.z
+            );
+          }
         }
 
-        const edgePoints = [];
-        if (cutGrid[h][next]) {
-          edgePoints.push(v2.clone().add(v3).multiplyScalar(0.5));
-        }
-        if (cutGrid[h][prev]) {
-          edgePoints.push(v1.clone().add(v4).multiplyScalar(0.5));
-        }
-        if (h < heightSegments - 1 && cutGrid[h + 1][s]) {
-          edgePoints.push(v4.clone().add(v3).multiplyScalar(0.5));
-        }
-        if (h > 0 && cutGrid[h - 1][s]) {
-          edgePoints.push(v1.clone().add(v2).multiplyScalar(0.5));
-        }
+        if (collectBoundary) {
+          const edgePoints = [];
+          if (cutGrid[h][next]) {
+            edgePoints.push(v2.clone().add(v3).multiplyScalar(0.5));
+          }
+          if (cutGrid[h][prev]) {
+            edgePoints.push(v1.clone().add(v4).multiplyScalar(0.5));
+          }
+          if (h < heightSegments - 1 && cutGrid[h + 1][s]) {
+            edgePoints.push(v4.clone().add(v3).multiplyScalar(0.5));
+          }
+          if (h > 0 && cutGrid[h - 1][s]) {
+            edgePoints.push(v1.clone().add(v2).multiplyScalar(0.5));
+          }
 
-        for (const p of edgePoints) {
-          const key = `${p.x.toFixed(3)}_${p.y.toFixed(3)}_${p.z.toFixed(3)}`;
-          if (!boundaryMap.has(key)) {
-            boundaryMap.set(key, p);
+          for (const p of edgePoints) {
+            const key = `${p.x.toFixed(3)}_${p.y.toFixed(3)}_${p.z.toFixed(3)}`;
+            if (!boundaryMap.has(key)) {
+              boundaryMap.set(key, p);
+            }
           }
         }
       }
     }
   }
 
-  buildBaseFromGrid();
-
-  if (params.mode === "mesh" && positions.length === 0) {
-    for (let h = 0; h < heightSegments; h += 1) {
-      for (let s = 0; s < radialSegments; s += 1) {
-        keepGrid[h][s] = true;
-      }
-    }
-    positions.length = 0;
-    indices.length = 0;
-    colors.length = 0;
-    boundaryMap.clear();
-    buildBaseFromGrid();
-  }
+  buildBaseFromGrid(keepGrid, true, false);
+  buildBaseFromGrid(displayGrid, false, true);
 
   baseSeedPoints = Array.from(boundaryMap.values());
 
@@ -937,13 +963,15 @@ function updateBaseRing() {
       vertexColors: true,
       transparent: true,
       opacity: 1,
-      roughness: 0.4,
-      metalness: 0.1,
+      roughness: 0.25,
+      metalness: 0.5,
       side: THREE.DoubleSide,
     });
     flipTriangleWinding(welded);
     welded.computeVertexNormals();
     baseRingMesh = new THREE.Mesh(welded, material);
+    baseRingMesh.castShadow = true;
+    baseRingMesh.receiveShadow = true;
   } else {
     geometry.setAttribute(
       "position",
@@ -1080,12 +1108,14 @@ function buildMeshGrowth(rings) {
     vertexColors: true,
     transparent: true,
     opacity: params.meshOpacity,
-    roughness: 0.55,
-    metalness: 0.08,
+    roughness: 0.35,
+    metalness: 0.35,
     side: THREE.DoubleSide,
   });
 
   growthMesh = new THREE.Mesh(geometry, material);
+  growthMesh.castShadow = true;
+  growthMesh.receiveShadow = true;
   growthGroup.add(growthMesh);
 }
 
@@ -1154,6 +1184,8 @@ function bakeGeometry() {
     baked = new THREE.LineSegments(geometry, material);
   } else {
     baked = new THREE.Mesh(geometry, material);
+    baked.castShadow = true;
+    baked.receiveShadow = true;
   }
 
   source.updateMatrixWorld(true);
@@ -1269,12 +1301,14 @@ function mergeAndSmoothMeshes() {
     vertexColors: true,
     transparent: true,
     opacity: 1,
-    roughness: 0.5,
-    metalness: 0.08,
+    roughness: 0.3,
+    metalness: 0.45,
     side: THREE.DoubleSide,
   });
 
   mergedMesh = new THREE.Mesh(seamWelded, material);
+  mergedMesh.castShadow = true;
+  mergedMesh.receiveShadow = true;
   growthGroup.add(mergedMesh);
 
   growthGroup.remove(growthMesh);
@@ -1722,8 +1756,8 @@ function smoothLaplacian(geometry, iterations, lambda) {
 const gui = new GUI({ width: 250 });
 const growthFolder = gui.addFolder("Growth");
 growthFolder.add(params, "mode", ["mesh", "lines"]).onChange(buildGrowth);
-growthFolder.add(params, "segments", 24, 400, 1).onChange(buildGrowth);
-growthFolder.add(params, "simSegmentsCap", 60, 400, 1).onChange(buildGrowth);
+growthFolder.add(params, "segments", 250, 500, 1).onChange(buildGrowth);
+growthFolder.add(params, "simSegmentsCap", 50, 200, 1).onChange(buildGrowth);
 growthFolder.add(params, "iterations", 4, 30, 1).onChange(buildGrowth);
 growthFolder.add(params, "stepLength", 0.02, 0.4, 0.01).onChange(buildGrowth);
 growthFolder.add(params, "twist", -6.28, 6.28, 0.01).onChange(buildGrowth);
@@ -1735,10 +1769,10 @@ baseFolder.add(params, "ringSegments", 60, 720, 1).onChange(buildGrowth);
 baseFolder.add(params, "extrusionWidth", 0.1, 0.75, 0.01).onChange(buildGrowth);
 baseFolder.add(params, "baseQuadDivisions", 1, 10, 1).onChange(buildGrowth);
 baseFolder.add(params, "baseCullFalloff", 0.05, 1.5, 0.01).onChange(buildGrowth);
-baseFolder.add(params, "deformableZone", 0.3, 2, 0.05).onChange(buildGrowth);
+baseFolder.add(params, "deformableZone", 1, 5, 0.05).onChange(buildGrowth);
 
 const leafFolder = gui.addFolder("Leaf");
-leafFolder.add(params, "ruffleAmplitude", 0, 0.8, 0.01).onChange(buildGrowth);
+leafFolder.add(params, "ruffleAmplitude", 0, 1.5, 0.01).onChange(buildGrowth);
 leafFolder.add(params, "ruffleFrequency", 0.5, 12, 0.1).onChange(buildGrowth);
 leafFolder.add(params, "ruffleGrowth", 0, 2, 0.05).onChange(buildGrowth);
 leafFolder.add(params, "leafGrowth", 0, 3, 0.05).onChange(buildGrowth);
@@ -1763,13 +1797,13 @@ materialFolder.add(params, "lineOpacity", 0.1, 1, 0.01).onChange(buildGrowth);
 materialFolder.add(params, "smoothnessStrength", 1, 15, 1).onChange(buildGrowth);
 
 const collisionFolder = gui.addFolder("Collision");
-collisionFolder.add(params, "collisionStrength", 0, 1, 0.01).onChange(buildGrowth);
+collisionFolder.add(params, "collisionStrength", 0, 0.05, 0.001).onChange(buildGrowth);
 collisionFolder.add(params, "collisionIterations", 0, 15, 1).onChange(buildGrowth);
 collisionFolder.add(params, "collisionRange", 1, 10, 0.05).onChange(buildGrowth);
 
 const colorFolder = gui.addFolder("Color");
-colorFolder.addColor(params, "baseColor").onChange(buildGrowth);
 colorFolder.addColor(params, "ridgeColor").onChange(buildGrowth);
+colorFolder.addColor(params, "baseColor").onChange(buildGrowth);
 colorFolder.addColor(params, "lineColor").onChange(buildGrowth);
 
 const viewFolder = gui.addFolder("View");
