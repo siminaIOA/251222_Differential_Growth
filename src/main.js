@@ -40,10 +40,10 @@ scene.add(growthGroup);
 const bakedGroup = new THREE.Group();
 scene.add(bakedGroup);
 
-const ambientLight = new THREE.AmbientLight(0xffffff, 0.35);
+const ambientLight = new THREE.AmbientLight(0xffffff, 0.72);
 scene.add(ambientLight);
 
-const keyLight = new THREE.DirectionalLight(0xffffff, 1.1);
+const keyLight = new THREE.DirectionalLight(0xffffff, 1.7);
 keyLight.position.set(6, 8, 5);
 keyLight.castShadow = true;
 keyLight.shadow.mapSize.set(2048, 2048);
@@ -59,11 +59,11 @@ keyLight.shadow.radius = 6;
 scene.add(keyLight);
 scene.add(keyLight.target);
 
-const fillLight = new THREE.DirectionalLight(0x8aa6ff, 0.35);
+const fillLight = new THREE.DirectionalLight(0x8aa6ff, 0.7);
 fillLight.position.set(-6, 3, -6);
 scene.add(fillLight);
 
-const rimLight = new THREE.DirectionalLight(0xffd6b3, 0.25);
+const rimLight = new THREE.DirectionalLight(0xffd6b3, 0.35);
 rimLight.position.set(0, 6, -8);
 scene.add(rimLight);
 
@@ -131,7 +131,7 @@ function buildBakedLine(geometry) {
   const material = new THREE.LineBasicMaterial({
     color: params.lineColor,
     transparent: true,
-    opacity: params.lineOpacity,
+    opacity: 1,
   });
   return new THREE.LineSegments(wireGeom, material);
 }
@@ -301,21 +301,20 @@ scene.add(majorGrid);
 
 const params = {
   mode: "mesh",
-  segments: 300,
-  simSegmentsCap: 150,
+  segments: 250,
+  simSegmentsCap: 151,
   iterations: 30,
-  stepLength: 0.2,
+  stepLength: 0.18,
   ringRadius: 1.5,
   ringSegments: 60,
   twist: 1,
   ruffleAmplitude: 0.3,
   ruffleFrequency: 0.5,
   ruffleGrowth: 0,
-  leafGrowth: 1.45,
-  ridgeLift: 0,
+  leafGrowth: 0.65,
+  ridgeLift: 0.23,
   ridgeSharpness: 0.2,
   curl: 0.85,
-  rimCurl: 1.2,
   rimCurlWidth: 0.05,
   bowl: -0.15,
   taper: 0,
@@ -323,15 +322,14 @@ const params = {
   attractorY: 2.0,
   attractorZ: 0,
   attractorRadius: 0.1,
-  attractorStrength: 0.2,
+  attractorStrength: 0.55,
   attractorBias: 0.5,
   meshOpacity: 1,
-  lineOpacity: 1,
   lineColor: "#ffffff",
-  smoothnessStrength: 5,
+  smoothnessStrength: 8,
   collisionStrength: 0,
   collisionIterations: 15,
-  collisionRange: 10,
+  collisionRange: 1,
   ridgeColor: "#ff0000",
   baseColor: "#4400ff",
   extrusionWidth: 0.35,
@@ -563,7 +561,7 @@ function generateRings() {
       const rimWidth = Math.max(0.05, params.rimCurlWidth);
       const rimStart = Math.max(0, 1 - rimWidth);
       const rimFactor = Math.min(1, Math.max(0, (t - rimStart) / rimWidth));
-      const rimCurlAngle = params.rimCurl * rimFactor * (0.2 + t);
+      const rimCurlAngle = 0.35 * rimFactor * (0.2 + t);
       point.applyAxisAngle(radial, rimCurlAngle);
       point.y -= params.bowl * radial.length() * radial.length() * 0.35;
 
@@ -980,7 +978,7 @@ function updateBaseRing() {
     const material = new THREE.LineBasicMaterial({
       color: params.lineColor,
       transparent: true,
-      opacity: params.lineOpacity,
+      opacity: 1,
     });
     baseRingMesh = new THREE.LineSegments(geometry, material);
   }
@@ -1025,7 +1023,7 @@ function buildLineGrowth(rings) {
   const material = new THREE.LineBasicMaterial({
     color: params.lineColor,
     transparent: true,
-    opacity: params.lineOpacity,
+    opacity: 1,
   });
 
   growthLines = new THREE.LineSegments(geometry, material);
@@ -1757,54 +1755,82 @@ const gui = new GUI({ width: 250 });
 const growthFolder = gui.addFolder("Growth");
 growthFolder.add(params, "mode", ["mesh", "lines"]).onChange(buildGrowth);
 growthFolder.add(params, "segments", 250, 500, 1).onChange(buildGrowth);
-growthFolder.add(params, "simSegmentsCap", 50, 200, 1).onChange(buildGrowth);
+growthFolder.add(params, "simSegmentsCap", 50, 150, 1).onChange(buildGrowth);
 growthFolder.add(params, "iterations", 4, 30, 1).onChange(buildGrowth);
-growthFolder.add(params, "stepLength", 0.02, 0.4, 0.01).onChange(buildGrowth);
-growthFolder.add(params, "twist", -6.28, 6.28, 0.01).onChange(buildGrowth);
-growthFolder.add(params, "growthFalloff", 0.2, 3, 0.05).onChange(buildGrowth);
+growthFolder.add(params, "stepLength", 0.02, 0.3, 0.01).onChange(buildGrowth);
+growthFolder.add(params, "twist", -10, 10, 0.01).onChange(buildGrowth);
+growthFolder.add(params, "growthFalloff", 0.2, 2, 0.05).onChange(buildGrowth);
 
 const baseFolder = gui.addFolder("Base");
-baseFolder.add(params, "ringRadius", 0.2, 3, 0.05).onChange(buildGrowth);
-baseFolder.add(params, "ringSegments", 60, 720, 1).onChange(buildGrowth);
-baseFolder.add(params, "extrusionWidth", 0.1, 0.75, 0.01).onChange(buildGrowth);
+baseFolder.add(params, "ringRadius", 1, 3, 0.05).onChange(buildGrowth);
+baseFolder.add(params, "ringSegments", 60, 300, 1).onChange(buildGrowth);
+baseFolder.add(params, "extrusionWidth", 0.1, 0.5, 0.01).onChange(buildGrowth);
 baseFolder.add(params, "baseQuadDivisions", 1, 10, 1).onChange(buildGrowth);
 baseFolder.add(params, "baseCullFalloff", 0.05, 1.5, 0.01).onChange(buildGrowth);
 baseFolder.add(params, "deformableZone", 1, 5, 0.05).onChange(buildGrowth);
 
 const leafFolder = gui.addFolder("Leaf");
-leafFolder.add(params, "ruffleAmplitude", 0, 1.5, 0.01).onChange(buildGrowth);
+leafFolder.add(params, "ruffleAmplitude", 0, 1.0, 0.01).onChange(buildGrowth);
 leafFolder.add(params, "ruffleFrequency", 0.5, 12, 0.1).onChange(buildGrowth);
 leafFolder.add(params, "ruffleGrowth", 0, 2, 0.05).onChange(buildGrowth);
-leafFolder.add(params, "leafGrowth", 0, 3, 0.05).onChange(buildGrowth);
-leafFolder.add(params, "ridgeLift", 0, 0.6, 0.01).onChange(buildGrowth);
+leafFolder.add(params, "leafGrowth", 0.1, 3, 0.05).onChange(buildGrowth);
+leafFolder.add(params, "ridgeLift", 0, 1.0, 0.01).onChange(buildGrowth);
 leafFolder.add(params, "ridgeSharpness", 0.2, 3, 0.05).onChange(buildGrowth);
-leafFolder.add(params, "curl", -0.85, 0.85, 0.01).onChange(buildGrowth);
-leafFolder.add(params, "rimCurl", -1.2, 1.2, 0.01).onChange(buildGrowth);
-leafFolder.add(params, "rimCurlWidth", 0.05, 0.6, 0.01).onChange(buildGrowth);
+leafFolder.add(params, "curl", -1, 1, 0.01).onChange(buildGrowth);
+leafFolder.add(params, "rimCurlWidth", 0.05, 0.3, 0.01).onChange(buildGrowth);
 leafFolder.add(params, "bowl", -0.3, -0.05, 0.01).onChange(buildGrowth);
-leafFolder.add(params, "taper", 0, 1.2, 0.01).onChange(buildGrowth);
+leafFolder.add(params, "taper", 0, 1.5, 0.01).onChange(buildGrowth);
 
 const attractorFolder = gui.addFolder("Attractor");
-attractorFolder.add(params, "attractorRadius", 0.1, 0.2, 0.01).onChange(buildGrowth);
+attractorFolder.add(params, "attractorRadius", 0.1, 0.3, 0.01).onChange(buildGrowth);
 attractorFolder
-  .add(params, "attractorStrength", 0, 1.2, 0.01)
+  .add(params, "attractorStrength", 0, 1.0, 0.01)
   .onChange(buildGrowth);
-attractorFolder.add(params, "attractorBias", -0.2, 0.6, 0.01).onChange(buildGrowth);
+attractorFolder.add(params, "attractorBias", 0, 0.7, 0.01).onChange(buildGrowth);
 
 const materialFolder = gui.addFolder("Material");
 materialFolder.add(params, "meshOpacity", 0.2, 1, 0.01).onChange(buildGrowth);
-materialFolder.add(params, "lineOpacity", 0.1, 1, 0.01).onChange(buildGrowth);
-materialFolder.add(params, "smoothnessStrength", 1, 15, 1).onChange(buildGrowth);
+materialFolder.add(params, "smoothnessStrength", 1, 20, 1).onChange(buildGrowth);
 
 const collisionFolder = gui.addFolder("Collision");
-collisionFolder.add(params, "collisionStrength", 0, 0.05, 0.001).onChange(buildGrowth);
+collisionFolder.add(params, "collisionStrength", 0, 0.001, 0.0001).onChange(buildGrowth);
 collisionFolder.add(params, "collisionIterations", 0, 15, 1).onChange(buildGrowth);
-collisionFolder.add(params, "collisionRange", 1, 10, 0.05).onChange(buildGrowth);
+collisionFolder.add(params, "collisionRange", 1, 15, 0.05).onChange(buildGrowth);
+
+function randomHexColor() {
+  const hue = Math.random();
+  const saturation = 1;
+  const lightness = 0.5;
+  const color = new THREE.Color();
+  color.setHSL(hue, saturation, lightness);
+  return `#${color.getHexString()}`;
+}
 
 const colorFolder = gui.addFolder("Color");
-colorFolder.addColor(params, "ridgeColor").onChange(buildGrowth);
-colorFolder.addColor(params, "baseColor").onChange(buildGrowth);
+const ridgeColorController = colorFolder.addColor(params, "ridgeColor").onChange(buildGrowth);
+const baseColorController = colorFolder.addColor(params, "baseColor").onChange(buildGrowth);
 colorFolder.addColor(params, "lineColor").onChange(buildGrowth);
+
+function randomizeColors() {
+  const ridge = randomHexColor();
+  let base = randomHexColor();
+  if (base === ridge) {
+    base = randomHexColor();
+  }
+  params.ridgeColor = ridge;
+  params.baseColor = base;
+  buildGrowth();
+}
+
+colorFolder.add({ randomColors: randomizeColors }, "randomColors");
+
+const randomizeButton = colorFolder.controllers.at(-1);
+if (randomizeButton) {
+  randomizeButton.onChange(() => {
+    ridgeColorController.updateDisplay();
+    baseColorController.updateDisplay();
+  });
+}
 
 const viewFolder = gui.addFolder("View");
 viewFolder.add(params, "autoRotate");
@@ -1812,7 +1838,7 @@ viewFolder.add({ bakeGeometry }, "bakeGeometry");
 viewFolder.add({ deleteLastBake }, "deleteLastBake");
 viewFolder.add({ clearBakes }, "clearBakes");
 viewFolder.add(params, "bakeBaseOffset", 0.5, 4, 0.05).onChange(updateBakedOffsets);
-viewFolder.add(params, "bakeSpacing", 0.5, 4, 0.05).onChange(updateBakedOffsets);
+viewFolder.add(params, "bakeSpacing", 0.5, 10, 0.05).onChange(updateBakedOffsets);
 
 gui.close();
 
