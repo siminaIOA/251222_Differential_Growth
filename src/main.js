@@ -4,6 +4,7 @@ import GUI from "lil-gui";
 import { OrbitControls } from "three/examples/jsm/controls/OrbitControls.js";
 import { TransformControls } from "three/examples/jsm/controls/TransformControls.js";
 import * as BufferGeometryUtils from "three/examples/jsm/utils/BufferGeometryUtils.js";
+import { PLYExporter } from "three/examples/jsm/exporters/PLYExporter.js";
 
 const scene = new THREE.Scene();
 scene.background = new THREE.Color("#050505");
@@ -147,6 +148,145 @@ function buildBakedMesh(geometry, materialHint) {
       side: THREE.DoubleSide,
     });
   return new THREE.Mesh(geometry, material);
+}
+
+function ensureVertexColors(geometry, fallbackHex) {
+  if (geometry.getAttribute("color")) {
+    return;
+  }
+  const position = geometry.getAttribute("position");
+  if (!position) {
+    return;
+  }
+  const color = new THREE.Color(fallbackHex || "#ffffff");
+  const colors = new Float32Array(position.count * 3);
+  for (let i = 0; i < position.count; i += 1) {
+    colors[i * 3] = color.r;
+    colors[i * 3 + 1] = color.g;
+    colors[i * 3 + 2] = color.b;
+  }
+  geometry.setAttribute("color", new THREE.BufferAttribute(colors, 3));
+}
+
+function downloadBlob(data, filename, mimeType) {
+  const blob = data instanceof Blob ? data : new Blob([data], { type: mimeType });
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement("a");
+  link.href = url;
+  link.download = filename;
+  document.body.appendChild(link);
+  link.click();
+  link.remove();
+  URL.revokeObjectURL(url);
+}
+
+function collectExportGeometries() {
+  if (params.mode !== "mesh") {
+    return [];
+  }
+
+  const geometries = [];
+  const addMesh = (mesh) => {
+    if (!mesh || !mesh.isMesh || !mesh.geometry) {
+      return;
+    }
+    mesh.updateMatrixWorld(true);
+    const geometry = mesh.geometry.clone();
+    geometry.applyMatrix4(mesh.matrixWorld);
+    ensureVertexColors(geometry, params.baseColor);
+    geometry.computeVertexNormals();
+    geometries.push(geometry);
+  };
+
+  const primary = mergedMesh || growthMesh || baseRingMesh;
+  if (primary && primary.isMesh) {
+    addMesh(primary);
+  } else {
+    addMesh(growthMesh);
+    addMesh(baseRingMesh);
+  }
+
+  for (const baked of bakedGroup.children) {
+    if (baked.isMesh) {
+      addMesh(baked);
+    }
+  }
+
+  return geometries;
+}
+
+function buildMergedExportGeometry() {
+  const geometries = collectExportGeometries();
+  if (!geometries.length) {
+    return null;
+  }
+  const merged = BufferGeometryUtils.mergeGeometries(geometries, true);
+  if (!merged) {
+    return null;
+  }
+  merged.computeVertexNormals();
+  ensureVertexColors(merged, params.baseColor);
+  return merged;
+}
+
+function exportOBJWithColors(geometry) {
+  const position = geometry.getAttribute("position");
+  if (!position) {
+    return "";
+  }
+  const colorAttr = geometry.getAttribute("color");
+  const normalAttr = geometry.getAttribute("normal");
+  const index = geometry.getIndex();
+  let output = "o floral_ring\n";
+
+  for (let i = 0; i < position.count; i += 1) {
+    const x = position.getX(i);
+    const y = position.getY(i);
+    const z = position.getZ(i);
+    if (colorAttr) {
+      const r = colorAttr.getX(i).toFixed(6);
+      const g = colorAttr.getY(i).toFixed(6);
+      const b = colorAttr.getZ(i).toFixed(6);
+      output += `v ${x} ${y} ${z} ${r} ${g} ${b}\n`;
+    } else {
+      output += `v ${x} ${y} ${z}\n`;
+    }
+  }
+
+  if (normalAttr) {
+    for (let i = 0; i < normalAttr.count; i += 1) {
+      const nx = normalAttr.getX(i);
+      const ny = normalAttr.getY(i);
+      const nz = normalAttr.getZ(i);
+      output += `vn ${nx} ${ny} ${nz}\n`;
+    }
+  }
+
+  if (index) {
+    for (let i = 0; i < index.count; i += 3) {
+      const a = index.getX(i) + 1;
+      const b = index.getX(i + 1) + 1;
+      const c = index.getX(i + 2) + 1;
+      if (normalAttr) {
+        output += `f ${a}//${a} ${b}//${b} ${c}//${c}\n`;
+      } else {
+        output += `f ${a} ${b} ${c}\n`;
+      }
+    }
+  } else {
+    for (let i = 0; i < position.count; i += 3) {
+      const a = i + 1;
+      const b = i + 2;
+      const c = i + 3;
+      if (normalAttr) {
+        output += `f ${a}//${a} ${b}//${b} ${c}//${c}\n`;
+      } else {
+        output += `f ${a} ${b} ${c}\n`;
+      }
+    }
+  }
+
+  return output;
 }
 
 function replaceBakedObject(oldObj, newObj) {
@@ -1291,7 +1431,11 @@ function mergeAndSmoothMeshes() {
   enforceRingRoundness(welded);
   const seamWeld = Math.min(0.015, seamRadius * 0.1);
   const seamWelded = BufferGeometryUtils.mergeVertices(welded, seamWeld);
-  const thickened = applyThickness(seamWelded, params.meshThickness, 1);
+  let thickened = applyThickness(seamWelded, params.meshThickness, 1.6);
+  if (params.meshThickness > 0) {
+    thickened = BufferGeometryUtils.mergeVertices(thickened, 1e-4);
+    smoothLaplacian(thickened, 4, 0.18);
+  }
   flipTriangleWinding(thickened);
   applyVerticalGradient(thickened, params.baseColor, params.ridgeColor);
   thickened.computeVertexNormals();
@@ -1790,7 +1934,7 @@ attractorFolder
 attractorFolder.add(params, "attractorBias", 0, 0.7, 0.01).onChange(buildGrowth);
 
 const materialFolder = gui.addFolder("Material");
-materialFolder.add(params, "meshThickness", 0, 0.2, 0.005).onChange(buildGrowth);
+materialFolder.add(params, "meshThickness", 0, 0.035, 0.001).onChange(buildGrowth);
 materialFolder.add(params, "smoothnessStrength", 1, 20, 1).onChange(buildGrowth);
 
 const collisionFolder = gui.addFolder("Collision");
@@ -1812,15 +1956,65 @@ const ridgeColorController = colorFolder.addColor(params, "ridgeColor").onChange
 const baseColorController = colorFolder.addColor(params, "baseColor").onChange(buildGrowth);
 colorFolder.addColor(params, "lineColor").onChange(buildGrowth);
 
-function randomizeColors() {
-  const ridge = randomHexColor();
-  let base = randomHexColor();
-  if (base === ridge) {
-    base = randomHexColor();
+const recentRandomColors = [];
+
+function getColorDistance(a, b) {
+  return Math.sqrt(
+    Math.pow(a.r - b.r, 2) +
+      Math.pow(a.g - b.g, 2) +
+      Math.pow(a.b - b.b, 2)
+  );
+}
+
+function getHueDistance(a, b) {
+  const hslA = { h: 0, s: 0, l: 0 };
+  const hslB = { h: 0, s: 0, l: 0 };
+  a.getHSL(hslA);
+  b.getHSL(hslB);
+  const diff = Math.abs(hslA.h - hslB.h);
+  return Math.min(diff, 1 - diff);
+}
+
+function pickDistinctColor(excludeColors) {
+  const minHueDelta = 0.18;
+  const minRgbDelta = 0.35;
+  for (let attempt = 0; attempt < 40; attempt += 1) {
+    const hex = randomHexColor();
+    const color = new THREE.Color(hex);
+    let ok = true;
+    for (const other of excludeColors) {
+      if (getHueDistance(color, other) < minHueDelta) {
+        ok = false;
+        break;
+      }
+      if (getColorDistance(color, other) < minRgbDelta) {
+        ok = false;
+        break;
+      }
+    }
+    if (ok) {
+      return hex;
+    }
   }
+  return randomHexColor();
+}
+
+function randomizeColors() {
+  const exclude = recentRandomColors
+    .map((hex) => new THREE.Color(hex))
+    .concat([new THREE.Color(params.baseColor), new THREE.Color(params.ridgeColor)]);
+  const ridge = pickDistinctColor(exclude);
+  exclude.push(new THREE.Color(ridge));
+  const base = pickDistinctColor(exclude);
   params.ridgeColor = ridge;
   params.baseColor = base;
+  recentRandomColors.push(ridge, base);
+  if (recentRandomColors.length > 12) {
+    recentRandomColors.splice(0, recentRandomColors.length - 12);
+  }
   buildGrowth();
+  ridgeColorController.updateDisplay();
+  baseColorController.updateDisplay();
 }
 
 colorFolder.add({ randomColors: randomizeColors }, "randomColors");
@@ -1832,6 +2026,27 @@ if (randomizeButton) {
     baseColorController.updateDisplay();
   });
 }
+
+function exportPLY() {
+  if (params.mode !== "mesh") {
+    alert("Switch to mesh mode before exporting.");
+    return;
+  }
+  const geometry = buildMergedExportGeometry();
+  if (!geometry) {
+    return;
+  }
+  const mesh = new THREE.Mesh(
+    geometry,
+    new THREE.MeshStandardMaterial({ vertexColors: true })
+  );
+  const exporter = new PLYExporter();
+  const data = exporter.parse(mesh, undefined, { binary: false });
+  downloadBlob(data, "floral-ring.ply", "text/plain");
+}
+
+const exportFolder = gui.addFolder("Export");
+exportFolder.add({ "export .ply": exportPLY }, "export .ply");
 
 const viewFolder = gui.addFolder("View");
 viewFolder.add(params, "autoRotate");
