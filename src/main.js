@@ -5,6 +5,7 @@ import { OrbitControls } from "three/examples/jsm/controls/OrbitControls.js";
 import { TransformControls } from "three/examples/jsm/controls/TransformControls.js";
 import * as BufferGeometryUtils from "three/examples/jsm/utils/BufferGeometryUtils.js";
 import { PLYExporter } from "three/examples/jsm/exporters/PLYExporter.js";
+import html2canvas from "html2canvas";
 
 const scene = new THREE.Scene();
 scene.background = new THREE.Color("#050505");
@@ -17,7 +18,7 @@ const camera = new THREE.PerspectiveCamera(
 );
 camera.position.set(6.36, 2.6, -6.36);
 
-const renderer = new THREE.WebGLRenderer({ antialias: true });
+const renderer = new THREE.WebGLRenderer({ antialias: true, preserveDrawingBuffer: true });
 renderer.setSize(window.innerWidth, window.innerHeight);
 renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
 renderer.outputColorSpace = THREE.SRGBColorSpace;

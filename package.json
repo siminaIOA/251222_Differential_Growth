@@ -13,6 +13,7 @@
   "author": "",
   "license": "ISC",
   "dependencies": {
+    "html2canvas": "^1.4.1",
     "lil-gui": "^0.21.0",
     "three": "^0.182.0",
     "three-stdlib": "^2.36.1"

@@ -50,11 +50,9 @@ input {
   background-image: none;
   -webkit-background-clip: text;
   background-clip: text;
-  border: 1px solid var(--frost-border);
+  border: 0;
   border-radius: 15px;
-  box-shadow:
-    0px 18px 40px 0px rgba(0, 0, 0, 0.18),
-    inset 0px 1px 0px 0px rgba(255, 255, 255, 0.25);
+  box-shadow: 0px 18px 40px 0px rgba(0, 0, 0, 0.18);
 }
 
 .lil-gui.root {
@@ -182,4 +180,26 @@ button.lil-title {
 
 .lil-gui button {
   border-radius: 12px;
+}
+
+body.snapshotting .lil-gui,
+body.snapshotting .lil-gui .title,
+body.snapshotting .lil-gui .controller,
+body.snapshotting .lil-gui .children,
+body.snapshotting .lil-gui .c input,
+body.snapshotting .lil-gui .c select,
+body.snapshotting .gui-drag-bar {
+  border: 0 !important;
+  box-shadow: none !important;
+}
+
+body.snapshotting .lil-gui {
+  background-color: rgba(8, 8, 8, 0.55) !important;
+}
+
+body.snapshotting .lil-gui .title,
+body.snapshotting .lil-gui .controller,
+body.snapshotting .lil-gui .children,
+body.snapshotting .gui-drag-bar {
+  background: transparent !important;
 }
