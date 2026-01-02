@@ -444,10 +444,10 @@ const params = {
   segments: 250,
   simSegmentsCap: 151,
   iterations: 30,
-  stepLength: 0.18,
+  stepLength: 0.28,
   ringRadius: 1.5,
-  ringSegments: 60,
-  twist: 1,
+  ringSegments: 273,
+  twist: -6.68,
   ruffleAmplitude: 0.3,
   ruffleFrequency: 0.5,
   ruffleGrowth: 0,
@@ -458,15 +458,15 @@ const params = {
   rimCurlWidth: 0.05,
   bowl: -0.15,
   taper: 0,
-  attractorX: 0,
-  attractorY: 2.0,
-  attractorZ: 0,
-  attractorRadius: 0.1,
+  attractorX: -0.2,
+  attractorY: 2.35,
+  attractorZ: -1.25,
+  attractorRadius: 0.3,
   attractorStrength: 0.55,
-  attractorBias: 0.5,
+  attractorBias: 0.57,
   meshThickness: 0,
   lineColor: "#ffffff",
-  smoothnessStrength: 8,
+  smoothnessStrength: 10,
   collisionStrength: 0,
   collisionIterations: 15,
   collisionRange: 1,
@@ -476,7 +476,7 @@ const params = {
   baseQuadDivisions: 4,
   baseCullFalloff: 1.25,
   deformableZone: 5,
-  growthFalloff: 0.4,
+  growthFalloff: 0.75,
   autoRotate: false,
   bakeBaseOffset: 1.35,
   bakeSpacing: 1.872,
@@ -1900,7 +1900,7 @@ const gui = new GUI({ width: 250 });
 const growthFolder = gui.addFolder("Growth");
 growthFolder.add(params, "mode", ["mesh", "lines"]).onChange(buildGrowth);
 growthFolder.add(params, "segments", 250, 500, 1).onChange(buildGrowth);
-growthFolder.add(params, "simSegmentsCap", 50, 150, 1).onChange(buildGrowth);
+growthFolder.add(params, "simSegmentsCap", 50, 151, 1).onChange(buildGrowth);
 growthFolder.add(params, "iterations", 4, 30, 1).onChange(buildGrowth);
 growthFolder.add(params, "stepLength", 0.02, 0.3, 0.01).onChange(buildGrowth);
 growthFolder.add(params, "twist", -10, 10, 0.01).onChange(buildGrowth);
