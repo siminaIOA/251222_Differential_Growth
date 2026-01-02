@@ -441,6 +441,7 @@ scene.add(majorGrid);
 
 const params = {
   mode: "mesh",
+  showEdges: false,
   segments: 250,
   simSegmentsCap: 151,
   iterations: 30,
@@ -484,7 +485,10 @@ const params = {
 
 let growthMesh = null;
 let growthLines = null;
+let ringLines = null;
+let finalMergedGeometry = null;
 let baseRingMesh = null;
+let baseRingWireGeometry = null;
 let baseSeedPoints = [];
 let mergedMesh = null;
 let baseSeedRing = null;
@@ -892,16 +896,24 @@ function clearGrowth() {
     growthLines.material.dispose();
     growthLines = null;
   }
+  if (ringLines) {
+    growthGroup.remove(ringLines);
+    ringLines.geometry.dispose();
+    ringLines.material.dispose();
+    ringLines = null;
+  }
   if (mergedMesh) {
     growthGroup.remove(mergedMesh);
     mergedMesh.geometry.dispose();
     mergedMesh.material.dispose();
     mergedMesh = null;
   }
+  finalMergedGeometry = null;
+  baseRingWireGeometry = null;
 }
 
 
-function updateBaseRing() {
+function updateBaseRing(forceMesh = false) {
   if (baseRingMesh) {
     growthGroup.remove(baseRingMesh);
     baseRingMesh.geometry.dispose();
@@ -1083,7 +1095,7 @@ function updateBaseRing() {
   baseSeedPoints = Array.from(boundaryMap.values());
 
   const geometry = new THREE.BufferGeometry();
-  const isMeshMode = params.mode === "mesh";
+  const isMeshMode = forceMesh || params.mode === "mesh";
   if (isMeshMode) {
     geometry.setAttribute(
       "position",
@@ -1110,6 +1122,7 @@ function updateBaseRing() {
     baseRingMesh = new THREE.Mesh(welded, material);
     baseRingMesh.castShadow = true;
     baseRingMesh.receiveShadow = true;
+    baseRingWireGeometry = welded.clone();
   } else {
     geometry.setAttribute(
       "position",
@@ -1168,6 +1181,125 @@ function buildLineGrowth(rings) {
 
   growthLines = new THREE.LineSegments(geometry, material);
   growthGroup.add(growthLines);
+}
+
+function buildFullRingGeometry() {
+  const width = Math.max(0.01, params.extrusionWidth);
+  const radialSegments = Math.min(
+    720,
+    Math.max(24, Math.floor(params.ringSegments || 240))
+  );
+  const heightSegments = Math.max(1, Math.min(10, Math.floor(params.baseQuadDivisions)));
+  const positions = [];
+  const indices = [];
+  const baseRotation = new THREE.Quaternion().setFromAxisAngle(
+    new THREE.Vector3(0, 0, 1),
+    Math.PI / 2
+  );
+
+  for (let h = 0; h < heightSegments; h += 1) {
+    const y1 = -width / 2 + (width * h) / heightSegments;
+    const y2 = -width / 2 + (width * (h + 1)) / heightSegments;
+    for (let s = 0; s < radialSegments; s += 1) {
+      const next = (s + 1) % radialSegments;
+      const angle = (Math.PI * 2 * s) / radialSegments;
+      const nextAngle = (Math.PI * 2 * next) / radialSegments;
+
+      const x1 = Math.cos(angle) * params.ringRadius;
+      const z1 = Math.sin(angle) * params.ringRadius;
+      const x2 = Math.cos(nextAngle) * params.ringRadius;
+      const z2 = Math.sin(nextAngle) * params.ringRadius;
+
+      const v1 = new THREE.Vector3(x1, y1, z1).applyQuaternion(baseRotation);
+      const v2 = new THREE.Vector3(x2, y1, z2).applyQuaternion(baseRotation);
+      const v3 = new THREE.Vector3(x2, y2, z2).applyQuaternion(baseRotation);
+      const v4 = new THREE.Vector3(x1, y2, z1).applyQuaternion(baseRotation);
+
+      const indexOffset = positions.length / 3;
+      positions.push(
+        v1.x, v1.y, v1.z,
+        v2.x, v2.y, v2.z,
+        v3.x, v3.y, v3.z,
+        v4.x, v4.y, v4.z
+      );
+      indices.push(
+        indexOffset, indexOffset + 1, indexOffset + 2,
+        indexOffset, indexOffset + 2, indexOffset + 3
+      );
+    }
+  }
+
+  const geometry = new THREE.BufferGeometry();
+  geometry.setAttribute("position", new THREE.Float32BufferAttribute(positions, 3));
+  geometry.setIndex(indices);
+  geometry.computeVertexNormals();
+  return geometry;
+}
+
+function buildFinalWireframe() {
+  const sourceGeom = finalMergedGeometry || (mergedMesh && mergedMesh.geometry) || null;
+  if (!sourceGeom) {
+    return;
+  }
+  const wireGeom = new THREE.WireframeGeometry(sourceGeom);
+  const material = new THREE.LineBasicMaterial({
+    color: params.lineColor,
+    transparent: true,
+    opacity: 1,
+  });
+  growthLines = new THREE.LineSegments(wireGeom, material);
+  growthGroup.add(growthLines);
+
+  const ringGeom = buildFullRingGeometry();
+  if (!ringGeom) {
+    return;
+  }
+  const ringWireGeom = new THREE.WireframeGeometry(ringGeom);
+  const ringMaterial = new THREE.LineBasicMaterial({
+    color: params.lineColor,
+    transparent: true,
+    opacity: 1,
+    linewidth: 2,
+    depthTest: false,
+  });
+  ringLines = new THREE.LineSegments(ringWireGeom, ringMaterial);
+  ringLines.scale.setScalar(1.01);
+  ringLines.renderOrder = 3;
+  ringLines.frustumCulled = false;
+  growthGroup.add(ringLines);
+}
+
+function buildOverlayEdges() {
+  const sourceGeom = finalMergedGeometry || (mergedMesh && mergedMesh.geometry) || null;
+  if (!sourceGeom) {
+    return;
+  }
+  const wireGeom = new THREE.WireframeGeometry(sourceGeom);
+  const material = new THREE.LineBasicMaterial({
+    color: params.lineColor,
+    transparent: true,
+    opacity: 0.85,
+  });
+  growthLines = new THREE.LineSegments(wireGeom, material);
+  growthLines.renderOrder = 4;
+  growthLines.frustumCulled = false;
+  growthGroup.add(growthLines);
+
+  const ringGeom = buildFullRingGeometry();
+  if (!ringGeom) {
+    return;
+  }
+  const ringWireGeom = new THREE.WireframeGeometry(ringGeom);
+  const ringMaterial = new THREE.LineBasicMaterial({
+    color: params.lineColor,
+    transparent: true,
+    opacity: 0.85,
+  });
+  ringLines = new THREE.LineSegments(ringWireGeom, ringMaterial);
+  ringLines.scale.setScalar(1.01);
+  ringLines.renderOrder = 5;
+  ringLines.frustumCulled = false;
+  growthGroup.add(ringLines);
 }
 
 function buildMeshGrowth(rings) {
@@ -1275,7 +1407,7 @@ function updateAttractor() {
 function buildGrowth() {
   clearGrowth();
   updateAttractor();
-  updateBaseRing();
+  updateBaseRing(true);
   const rings = generateRings();
   applyGlobalRelax(rings);
 
@@ -1298,8 +1430,22 @@ function buildGrowth() {
   if (params.mode === "mesh") {
     buildMeshGrowth(displayRings);
     mergeAndSmoothMeshes();
+    if (params.showEdges) {
+      buildOverlayEdges();
+    }
   } else {
-    buildLineGrowth(displayRings);
+    buildMeshGrowth(displayRings);
+    mergeAndSmoothMeshes();
+    if (mergedMesh) {
+      mergedMesh.visible = false;
+    }
+    if (growthMesh) {
+      growthMesh.visible = false;
+    }
+    if (baseRingMesh) {
+      baseRingMesh.visible = false;
+    }
+    buildFinalWireframe();
   }
   updateBakedDisplay();
 }
@@ -1439,6 +1585,7 @@ function mergeAndSmoothMeshes() {
   flipTriangleWinding(thickened);
   applyVerticalGradient(thickened, params.baseColor, params.ridgeColor);
   thickened.computeVertexNormals();
+  finalMergedGeometry = thickened.clone();
 
   const material = new THREE.MeshStandardMaterial({
     vertexColors: true,
@@ -1459,10 +1606,14 @@ function mergeAndSmoothMeshes() {
   growthMesh.material.dispose();
   growthMesh = null;
 
-  growthGroup.remove(baseRingMesh);
-  baseRingMesh.geometry.dispose();
-  baseRingMesh.material.dispose();
-  baseRingMesh = null;
+  if (params.mode === "mesh") {
+    growthGroup.remove(baseRingMesh);
+    baseRingMesh.geometry.dispose();
+    baseRingMesh.material.dispose();
+    baseRingMesh = null;
+  } else if (baseRingMesh) {
+    baseRingMesh.visible = false;
+  }
 }
 
 function flipTriangleWinding(geometry) {
@@ -1899,6 +2050,7 @@ function smoothLaplacian(geometry, iterations, lambda) {
 const gui = new GUI({ width: 250 });
 const growthFolder = gui.addFolder("Growth");
 growthFolder.add(params, "mode", ["mesh", "lines"]).onChange(buildGrowth);
+growthFolder.add(params, "showEdges").onChange(buildGrowth);
 growthFolder.add(params, "segments", 250, 500, 1).onChange(buildGrowth);
 growthFolder.add(params, "simSegmentsCap", 50, 151, 1).onChange(buildGrowth);
 growthFolder.add(params, "iterations", 4, 30, 1).onChange(buildGrowth);
@@ -2055,6 +2207,7 @@ viewFolder.add({ deleteLastBake }, "deleteLastBake");
 viewFolder.add({ clearBakes }, "clearBakes");
 viewFolder.add(params, "bakeBaseOffset", 0.5, 4, 0.05).onChange(updateBakedOffsets);
 viewFolder.add(params, "bakeSpacing", 0.5, 10, 0.05).onChange(updateBakedOffsets);
+
 
 gui.close();
 
